@@ -1,0 +1,14 @@
+{
+  "emeraldwalk.runonsave": {
+    "commands": [
+      {
+        "match": "\\.(py)$",
+        "cmd": "black ${file}"
+      },
+      {
+        "match": "\\.(py)$",
+        "cmd": "isort ${file}"
+      }
+    ]
+  }
+}
