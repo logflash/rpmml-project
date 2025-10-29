@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "D4RL"
+version = "0.0.1"  # This can be dynamically read from d4rl/__init__.py if preferred
+description = "Datasets for Data Driven Deep Reinforcement Learning."
+readme = "README.md"
+requires-python = ">=3.7, <3.11"
+license = { text = "Apache" }
+authors = [
+    { name = "Farama Foundation", email = "contact@farama.org" },
+]
+keywords = ["Reinforcement Learning", "Datasets", "RL", "AI"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    "gym<0.24.0",
+    "numpy",
+    "mujoco_py",
+    "pybullet",
+    "h5py",
+    "termcolor",
+    "click",
+    "dm_control>=1.0.3",
+    "mjrl @ git+https://github.com/aravindr93/mjrl@master#egg=mjrl",
+]
+
+
+[project.urls]
+Homepage = "https://github.com/Farama-Foundation/D4RL"
+Source = "https://github.com/Farama-Foundation/D4RL"
+Issues = "https://github.com/Farama-Foundation/D4RL/issues"
+
+
+[tool.setuptools]
+include-package-data = true
+
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["d4rl*"]
+
+
+[tool.setuptools.package-data]
+"d4rl" = [
+    "locomotion/assets/*",
+    "hand_manipulation_suite/assets/*",
+    "hand_manipulation_suite/Adroit/*",
+    "hand_manipulation_suite/Adroit/gallery/*",
+    "hand_manipulation_suite/Adroit/resources/*",
+    "hand_manipulation_suite/Adroit/resources/meshes/*",
+    "hand_manipulation_suite/Adroit/resources/textures/*",
+]

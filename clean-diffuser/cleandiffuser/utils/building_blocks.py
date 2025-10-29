@@ -4,7 +4,7 @@ import einops
 import numpy as np
 import torch
 import torch.nn as nn
-from cleandiffuser.utils import SinusoidalEmbedding
+from cleandiffuser.utils.utils import SinusoidalEmbedding
 
 from .iql import TwinQ, V
 
