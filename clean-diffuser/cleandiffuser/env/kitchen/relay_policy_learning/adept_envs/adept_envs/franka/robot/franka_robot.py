@@ -14,18 +14,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os, getpass
-import numpy as np
-from termcolor import cprint
-import time
 import copy
-import click
-
-from adept_envs import base_robot
-from adept_envs.utils.config import (get_config_root_node, read_config_from_node)
-
+import getpass
+import os
+import time
 # observations structure
 from collections import namedtuple
+
+import click
+import numpy as np
+from adept_envs import base_robot
+from adept_envs.utils.config import get_config_root_node, read_config_from_node
+from termcolor import cprint
+
 observation = namedtuple('observation', ['time', 'qpos_robot', 'qvel_robot', 'qpos_object', 'qvel_object'])
 
 

@@ -1,7 +1,8 @@
-from gym import spaces
-from cleandiffuser.env.pusht.pusht_env import PushTEnv
-import numpy as np
 import cv2
+import numpy as np
+from cleandiffuser.env.pusht.pusht_env import PushTEnv
+from gym import spaces
+
 
 class PushTImageEnv(PushTEnv):
     metadata = {"render.modes": ["rgb_array"], "video.frames_per_second": 10}

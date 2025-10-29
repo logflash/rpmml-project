@@ -1,8 +1,10 @@
 import pytest
 import torch
+from cleandiffuser.nn_classifier import (BaseNNClassifier, HalfDiT1d,
+                                         HalfJannerUNet1d, MLPNNClassifier,
+                                         QGPONNClassifier)
 from torch.nn import MSELoss
 
-from cleandiffuser.nn_classifier import HalfDiT1d, HalfJannerUNet1d, MLPNNClassifier, QGPONNClassifier, BaseNNClassifier
 
 @pytest.fixture
 def half_dit1d():

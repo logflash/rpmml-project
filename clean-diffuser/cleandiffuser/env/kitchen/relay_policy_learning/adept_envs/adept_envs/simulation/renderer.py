@@ -22,7 +22,6 @@ import sys
 from typing import Dict, Optional
 
 import numpy as np
-
 from adept_envs.simulation import module
 
 # Default window dimensions.

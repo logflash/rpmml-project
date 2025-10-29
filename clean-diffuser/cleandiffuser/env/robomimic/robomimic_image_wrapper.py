@@ -1,10 +1,12 @@
 from typing import List, Optional
-from matplotlib.pyplot import fill
-import numpy as np
+
 import gym
+import numpy as np
 from gym import spaces
+from matplotlib.pyplot import fill
 from omegaconf import OmegaConf
 from robomimic.envs.env_robosuite import EnvRobosuite
+
 
 class RobomimicImageWrapper(gym.Env):
     def __init__(self, 
@@ -121,14 +123,15 @@ class RobomimicImageWrapper(gym.Env):
 
 def test():
     import os
+
     from omegaconf import OmegaConf
     cfg_path = os.path.expanduser('~/dev/cleandiffuser/cleandiffuser/config/task/lift_image.yaml')
     cfg = OmegaConf.load(cfg_path)
     shape_meta = cfg['shape_meta']
 
 
-    import robomimic.utils.file_utils as FileUtils
     import robomimic.utils.env_utils as EnvUtils
+    import robomimic.utils.file_utils as FileUtils
     from matplotlib import pyplot as plt
 
     dataset_path = os.path.expanduser('~/dev/cleandiffuser/data/robomimic/datasets/square/ph/image.hdf5')

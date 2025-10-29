@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import numpy as np
+
 # For testing whether a number is close to zero
 _FLOAT_EPS = np.finfo(np.float64).eps
 _EPS4 = _FLOAT_EPS * 4.0

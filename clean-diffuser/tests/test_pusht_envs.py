@@ -1,13 +1,13 @@
-import sys
 import os
-import gym
-import pytest
-import numpy as np
+import sys
 
+import gym
+import numpy as np
+import pytest
 from cleandiffuser.env import pusht
 from cleandiffuser.env.pusht.pusht_keypoints_env import PushTKeypointsEnv
-from cleandiffuser.env.wrapper import VideoRecordingWrapper, MultiStepWrapper
 from cleandiffuser.env.utils import VideoRecorder
+from cleandiffuser.env.wrapper import MultiStepWrapper, VideoRecordingWrapper
 
 
 @pytest.fixture
@@ -22,21 +22,25 @@ def setup_env(request):
     fps = 10
     video_recorder = VideoRecorder.create_h264(
         fps=fps,
-        codec='h264',
-        input_pix_fmt='rgb24',
+        codec="h264",
+        input_pix_fmt="rgb24",
         crf=22,
-        thread_type='FRAME',
-        thread_count=1
+        thread_type="FRAME",
+        thread_count=1,
     )
     steps_per_render = max(10 // fps, 1)
-    env = VideoRecordingWrapper(env, video_recorder, file_path=None, steps_per_render=steps_per_render)
+    env = VideoRecordingWrapper(
+        env, video_recorder, file_path=None, steps_per_render=steps_per_render
+    )
     env = MultiStepWrapper(env, n_obs_steps=2, n_action_steps=8, max_episode_steps=300)
 
     env.seed(1000)
     return env
 
 
-@pytest.mark.parametrize("setup_env", ["pusht-v0", "pusht-image-v0", "pusht-keypoints-v0"], indirect=True)
+@pytest.mark.parametrize(
+    "setup_env", ["pusht-v0", "pusht-image-v0", "pusht-keypoints-v0"], indirect=True
+)
 def test_env_reset(setup_env):
     env = setup_env
 
@@ -44,7 +48,9 @@ def test_env_reset(setup_env):
     assert obs is not None
 
 
-@pytest.mark.parametrize("setup_env", ["pusht-v0", "pusht-image-v0", "pusht-keypoints-v0"], indirect=True)
+@pytest.mark.parametrize(
+    "setup_env", ["pusht-v0", "pusht-image-v0", "pusht-keypoints-v0"], indirect=True
+)
 def test_env_step(setup_env):
     env = setup_env
     obs = env.reset()

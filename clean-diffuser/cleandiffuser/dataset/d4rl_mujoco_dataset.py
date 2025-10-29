@@ -2,13 +2,12 @@ from typing import Dict
 
 import numpy as np
 import torch
-
 from cleandiffuser.dataset.base_dataset import BaseDataset
 from cleandiffuser.utils import GaussianNormalizer, dict_apply
 
 
 def return_reward_range(dataset, max_episode_steps):
-    """ Return the range of episodic returns in the D4RL-MuJoCo dataset. """
+    """Return the range of episodic returns in the D4RL-MuJoCo dataset."""
     returns, lengths = [], []
     ep_ret, ep_len = 0.0, 0
     for r, d in zip(dataset["rewards"], dataset["terminals"]):
@@ -24,7 +23,7 @@ def return_reward_range(dataset, max_episode_steps):
 
 
 def modify_reward(dataset, max_episode_steps=1000):
-    """ Modify the episodic return scale of the D4RL-MuJoCo dataset to be within [0, max_episode_steps]. """
+    """Modify the episodic return scale of the D4RL-MuJoCo dataset to be within [0, max_episode_steps]."""
     min_ret, max_ret = return_reward_range(dataset, max_episode_steps)
     dataset["rewards"] /= max_ret - min_ret
     dataset["rewards"] *= max_episode_steps
@@ -32,7 +31,7 @@ def modify_reward(dataset, max_episode_steps=1000):
 
 
 class D4RLMuJoCoDataset(BaseDataset):
-    """ **D4RL-MuJoCo Sequential Dataset**
+    """**D4RL-MuJoCo Sequential Dataset**
 
     torch.utils.data.Dataset wrapper for D4RL-MuJoCo dataset.
     Chunk the dataset into sequences of length `horizon` without padding.
@@ -70,13 +69,14 @@ class D4RLMuJoCoDataset(BaseDataset):
         >>> normed_obs = normalizer.normalize(obs)
         >>> unnormed_obs = normalizer.unnormalize(normed_obs)
     """
+
     def __init__(
-            self,
-            dataset: Dict[str, np.ndarray],
-            terminal_penalty: float = -100.,
-            horizon: int = 1,
-            max_path_length: int = 1000,
-            discount: float = 0.99,
+        self,
+        dataset: Dict[str, np.ndarray],
+        terminal_penalty: float = -100.0,
+        horizon: int = 1,
+        max_path_length: int = 1000,
+        discount: float = 0.99,
     ):
         super().__init__()
 
@@ -85,17 +85,21 @@ class D4RLMuJoCoDataset(BaseDataset):
             dataset["actions"].astype(np.float32),
             dataset["rewards"].astype(np.float32),
             dataset["timeouts"],
-            dataset["terminals"])
-        self.normalizers = {
-            "state": GaussianNormalizer(observations)}
+            dataset["terminals"],
+        )
+        self.normalizers = {"state": GaussianNormalizer(observations)}
         normed_observations = self.normalizers["state"].normalize(observations)
 
         self.horizon = horizon
         self.o_dim, self.a_dim = observations.shape[-1], actions.shape[-1]
 
         n_paths = np.sum(np.logical_or(terminals, timeouts))
-        self.seq_obs = np.zeros((n_paths, max_path_length, self.o_dim), dtype=np.float32)
-        self.seq_act = np.zeros((n_paths, max_path_length, self.a_dim), dtype=np.float32)
+        self.seq_obs = np.zeros(
+            (n_paths, max_path_length, self.o_dim), dtype=np.float32
+        )
+        self.seq_act = np.zeros(
+            (n_paths, max_path_length, self.a_dim), dtype=np.float32
+        )
         self.seq_rew = np.zeros((n_paths, max_path_length, 1), dtype=np.float32)
         self.seq_val = np.zeros((n_paths, max_path_length, 1), dtype=np.float32)
         self.tml_and_not_timeout = []
@@ -108,22 +112,28 @@ class D4RLMuJoCoDataset(BaseDataset):
                 path_lengths.append(i - ptr + 1)
 
                 if terminals[i] and not timeouts[i]:
-                    rewards[i] = terminal_penalty if terminal_penalty is not None else rewards[i]
+                    rewards[i] = (
+                        terminal_penalty if terminal_penalty is not None else rewards[i]
+                    )
                     self.tml_and_not_timeout.append([path_idx, i - ptr])
 
-                self.seq_obs[path_idx, :i - ptr + 1] = normed_observations[ptr:i + 1]
-                self.seq_act[path_idx, :i - ptr + 1] = actions[ptr:i + 1]
-                self.seq_rew[path_idx, :i - ptr + 1] = rewards[ptr:i + 1][:, None]
+                self.seq_obs[path_idx, : i - ptr + 1] = normed_observations[ptr : i + 1]
+                self.seq_act[path_idx, : i - ptr + 1] = actions[ptr : i + 1]
+                self.seq_rew[path_idx, : i - ptr + 1] = rewards[ptr : i + 1][:, None]
 
                 max_start = min(path_lengths[-1] - 1, max_path_length - horizon)
-                self.indices += [(path_idx, start, start + horizon) for start in range(max_start + 1)]
+                self.indices += [
+                    (path_idx, start, start + horizon) for start in range(max_start + 1)
+                ]
 
                 ptr = i + 1
                 path_idx += 1
 
         self.seq_val[:, -1] = self.seq_rew[:, -1]
         for i in range(max_path_length - 1):
-            self.seq_val[:, - 2 - i] = self.seq_rew[:, -2 - i] + discount * self.seq_val[:, -1 - i]
+            self.seq_val[:, -2 - i] = (
+                self.seq_rew[:, -2 - i] + discount * self.seq_val[:, -1 - i]
+            )
         self.path_lengths = np.array(path_lengths)
         self.tml_and_not_timeout = np.array(self.tml_and_not_timeout, dtype=np.int64)
 
@@ -137,11 +147,10 @@ class D4RLMuJoCoDataset(BaseDataset):
         path_idx, start, end = self.indices[idx]
 
         data = {
-            'obs': {
-                'state': self.seq_obs[path_idx, start:end]},
-            'act': self.seq_act[path_idx, start:end],
-            'rew': self.seq_rew[path_idx, start:end],
-            'val': self.seq_val[path_idx, start],
+            "obs": {"state": self.seq_obs[path_idx, start:end]},
+            "act": self.seq_act[path_idx, start:end],
+            "rew": self.seq_rew[path_idx, start:end],
+            "val": self.seq_val[path_idx, start],
         }
 
         torch_data = dict_apply(data, torch.tensor)
@@ -150,7 +159,7 @@ class D4RLMuJoCoDataset(BaseDataset):
 
 
 class D4RLMuJoCoTDDataset(BaseDataset):
-    """ **D4RL-MuJoCo Transition Dataset**
+    """**D4RL-MuJoCo Transition Dataset**
 
     torch.utils.data.Dataset wrapper for D4RL-MuJoCo dataset.
     Chunk the dataset into transitions.
@@ -184,6 +193,7 @@ class D4RLMuJoCoTDDataset(BaseDataset):
         >>> normed_obs = normalizer.normalize(obs)
         >>> unnormed_obs = normalizer.unnormalize(normed_obs)
     """
+
     def __init__(self, dataset: Dict[str, np.ndarray], normalize_reward: bool = False):
         super().__init__()
         if normalize_reward:
@@ -194,12 +204,14 @@ class D4RLMuJoCoTDDataset(BaseDataset):
             dataset["actions"].astype(np.float32),
             dataset["next_observations"].astype(np.float32),
             dataset["rewards"].astype(np.float32),
-            dataset["terminals"].astype(np.float32))
+            dataset["terminals"].astype(np.float32),
+        )
 
-        self.normalizers = {
-            "state": GaussianNormalizer(observations)}
+        self.normalizers = {"state": GaussianNormalizer(observations)}
         normed_observations = self.normalizers["state"].normalize(observations)
-        normed_next_observations = self.normalizers["state"].normalize(next_observations)
+        normed_next_observations = self.normalizers["state"].normalize(
+            next_observations
+        )
 
         self.obs = torch.tensor(normed_observations, dtype=torch.float32)
         self.act = torch.tensor(actions, dtype=torch.float32)
@@ -218,25 +230,28 @@ class D4RLMuJoCoTDDataset(BaseDataset):
 
     def __getitem__(self, idx: int):
         data = {
-            'obs': {
-                'state': self.obs[idx], },
-            'next_obs': {
-                'state': self.next_obs[idx], },
-            'act': self.act[idx],
-            'rew': self.rew[idx],
-            'tml': self.tml[idx], }
+            "obs": {
+                "state": self.obs[idx],
+            },
+            "next_obs": {
+                "state": self.next_obs[idx],
+            },
+            "act": self.act[idx],
+            "rew": self.rew[idx],
+            "tml": self.tml[idx],
+        }
 
         return data
 
 
 class MultiHorizonD4RLMuJoCoDataset(BaseDataset):
     def __init__(
-            self,
-            dataset,
-            terminal_penalty=-100,
-            horizons=(10, 20),
-            max_path_length=1000,
-            discount=0.99,
+        self,
+        dataset,
+        terminal_penalty=-100,
+        horizons=(10, 20),
+        max_path_length=1000,
+        discount=0.99,
     ):
         super().__init__()
 
@@ -245,9 +260,9 @@ class MultiHorizonD4RLMuJoCoDataset(BaseDataset):
             dataset["actions"].astype(np.float32),
             dataset["rewards"].astype(np.float32),
             dataset["timeouts"],
-            dataset["terminals"])
-        self.normalizers = {
-            "state": GaussianNormalizer(observations)}
+            dataset["terminals"],
+        )
+        self.normalizers = {"state": GaussianNormalizer(observations)}
         normed_observations = self.normalizers["state"].normalize(observations)
 
         self.horizons = horizons
@@ -255,8 +270,12 @@ class MultiHorizonD4RLMuJoCoDataset(BaseDataset):
         self.discount = discount ** np.arange(max_path_length, dtype=np.float32)
 
         n_paths = np.sum(np.logical_or(terminals, timeouts))
-        self.seq_obs = np.zeros((n_paths, max_path_length, self.o_dim), dtype=np.float32)
-        self.seq_act = np.zeros((n_paths, max_path_length, self.a_dim), dtype=np.float32)
+        self.seq_obs = np.zeros(
+            (n_paths, max_path_length, self.o_dim), dtype=np.float32
+        )
+        self.seq_act = np.zeros(
+            (n_paths, max_path_length, self.a_dim), dtype=np.float32
+        )
         self.seq_rew = np.zeros((n_paths, max_path_length, 1), dtype=np.float32)
         self.seq_val = np.zeros((n_paths, max_path_length, 1), dtype=np.float32)
         self.indices = [[] for _ in range(len(horizons))]
@@ -268,22 +287,32 @@ class MultiHorizonD4RLMuJoCoDataset(BaseDataset):
                 path_lengths.append(i - ptr + 1)
 
                 if terminals[i] and not timeouts[i]:
-                    rewards[i] = terminal_penalty if terminal_penalty is not None else rewards[i]
+                    rewards[i] = (
+                        terminal_penalty if terminal_penalty is not None else rewards[i]
+                    )
 
-                self.seq_obs[path_idx, :i - ptr + 1] = normed_observations[ptr:i + 1]
-                self.seq_act[path_idx, :i - ptr + 1] = actions[ptr:i + 1]
-                self.seq_rew[path_idx, :i - ptr + 1] = rewards[ptr:i + 1][:, None]
+                self.seq_obs[path_idx, : i - ptr + 1] = normed_observations[ptr : i + 1]
+                self.seq_act[path_idx, : i - ptr + 1] = actions[ptr : i + 1]
+                self.seq_rew[path_idx, : i - ptr + 1] = rewards[ptr : i + 1][:, None]
 
-                max_starts = [min(path_lengths[-1] - 1, max_path_length - horizon) for horizon in horizons]
+                max_starts = [
+                    min(path_lengths[-1] - 1, max_path_length - horizon)
+                    for horizon in horizons
+                ]
                 for k in range(len(horizons)):
-                    self.indices[k] += [(path_idx, start, start + horizons[k]) for start in range(max_starts[k] + 1)]
+                    self.indices[k] += [
+                        (path_idx, start, start + horizons[k])
+                        for start in range(max_starts[k] + 1)
+                    ]
 
                 ptr = i + 1
                 path_idx += 1
 
         self.seq_val[:, -1] = self.seq_rew[:, -1]
         for i in range(max_path_length - 1):
-            self.seq_val[:, - 2 - i] = self.seq_rew[:, -2 - i] + discount * self.seq_val[:, -1 - i]
+            self.seq_val[:, -2 - i] = (
+                self.seq_rew[:, -2 - i] + discount * self.seq_val[:, -1 - i]
+            )
         self.path_lengths = np.array(path_lengths)
         self.len_each_horizon = [len(indices) for indices in self.indices]
 
@@ -296,7 +325,9 @@ class MultiHorizonD4RLMuJoCoDataset(BaseDataset):
     def __getitem__(self, idx: int):
 
         indices = [
-            int(self.len_each_horizon[i] * (idx / self.len_each_horizon[-1])) for i in range(len(self.horizons))]
+            int(self.len_each_horizon[i] * (idx / self.len_each_horizon[-1]))
+            for i in range(len(self.horizons))
+        ]
 
         torch_datas = []
 
@@ -305,22 +336,25 @@ class MultiHorizonD4RLMuJoCoDataset(BaseDataset):
             path_idx, start, end = self.indices[i][indices[i]]
 
             data = {
-                'obs': {
-                    'state': self.seq_obs[path_idx, start:end]},
-                'act': self.seq_act[path_idx, start:end],
-                'val': self.seq_val[path_idx, start]}
+                "obs": {"state": self.seq_obs[path_idx, start:end]},
+                "act": self.seq_act[path_idx, start:end],
+                "val": self.seq_val[path_idx, start],
+            }
 
             torch_data = dict_apply(data, torch.tensor)
 
-            torch_datas.append({
-                "horizon": horizon,
-                "data": torch_data,
-            })
+            torch_datas.append(
+                {
+                    "horizon": horizon,
+                    "data": torch_data,
+                }
+            )
 
         return torch_datas
 
+
 class DV_D4RLMuJoCoSeqDataset(BaseDataset):
-    """ **D4RL-MuJoCo Sequential Dataset**
+    """**D4RL-MuJoCo Sequential Dataset**
 
     torch.utils.data.Dataset wrapper for D4RL-MuJoCo dataset.
     Chunk the dataset into sequences of length `horizon` without padding.
@@ -358,16 +392,17 @@ class DV_D4RLMuJoCoSeqDataset(BaseDataset):
         >>> normed_obs = normalizer.normalize(obs)
         >>> unnormed_obs = normalizer.unnormalize(normed_obs)
     """
+
     def __init__(
-            self,
-            dataset: Dict[str, np.ndarray],
-            terminal_penalty: float = -100,
-            horizon: int = 1,
-            max_path_length: int = 1000,
-            discount: float = 0.99,
-            center_mapping: bool = True,
-            stride: int = 1,
-            full_traj_bonus: float = 100,
+        self,
+        dataset: Dict[str, np.ndarray],
+        terminal_penalty: float = -100,
+        horizon: int = 1,
+        max_path_length: int = 1000,
+        discount: float = 0.99,
+        center_mapping: bool = True,
+        stride: int = 1,
+        full_traj_bonus: float = 100,
     ):
         super().__init__()
 
@@ -376,21 +411,25 @@ class DV_D4RLMuJoCoSeqDataset(BaseDataset):
             dataset["actions"].astype(np.float32),
             dataset["rewards"].astype(np.float32),
             dataset["timeouts"].astype(np.float32),
-            dataset["terminals"].astype(np.float32))
+            dataset["terminals"].astype(np.float32),
+        )
         self.stride = stride
 
-        self.normalizers = {
-            "state": GaussianNormalizer(observations)}
+        self.normalizers = {"state": GaussianNormalizer(observations)}
         normed_observations = self.normalizers["state"].normalize(observations)
 
         self.horizon = horizon
         self.o_dim, self.a_dim = observations.shape[-1], actions.shape[-1]
 
         n_paths = np.sum(np.logical_or(terminals, timeouts))
-        self.seq_obs = np.zeros((n_paths+1, max_path_length, self.o_dim), dtype=np.float32)
-        self.seq_act = np.zeros((n_paths+1, max_path_length, self.a_dim), dtype=np.float32)
-        self.seq_rew = np.zeros((n_paths+1, max_path_length, 1), dtype=np.float32)
-        self.seq_val = np.zeros((n_paths+1, max_path_length, 1), dtype=np.float32)
+        self.seq_obs = np.zeros(
+            (n_paths + 1, max_path_length, self.o_dim), dtype=np.float32
+        )
+        self.seq_act = np.zeros(
+            (n_paths + 1, max_path_length, self.a_dim), dtype=np.float32
+        )
+        self.seq_rew = np.zeros((n_paths + 1, max_path_length, 1), dtype=np.float32)
+        self.seq_val = np.zeros((n_paths + 1, max_path_length, 1), dtype=np.float32)
         self.indices = []
 
         ptr = 0
@@ -398,33 +437,46 @@ class DV_D4RLMuJoCoSeqDataset(BaseDataset):
         for i in range(timeouts.shape[0]):
             if timeouts[i] or terminals[i] or i == timeouts.shape[0] - 1:
                 path_length = i - ptr + 1
-                assert path_length <= max_path_length, f"current path length {path_length}"
+                assert (
+                    path_length <= max_path_length
+                ), f"current path length {path_length}"
 
                 if terminals[i]:
-                    rewards[i] = terminal_penalty if terminal_penalty is not None else rewards[i]
-                    
-                if path_length == max_path_length:
-                    rewards[i] = rewards[i] + full_traj_bonus if full_traj_bonus is not None else rewards[i]
+                    rewards[i] = (
+                        terminal_penalty if terminal_penalty is not None else rewards[i]
+                    )
 
-                self.seq_obs[path_idx, :path_length] = normed_observations[ptr:i + 1]
-                self.seq_act[path_idx, :path_length] = actions[ptr:i + 1]
-                self.seq_rew[path_idx, :path_length] = rewards[ptr:i + 1][:, None]
+                if path_length == max_path_length:
+                    rewards[i] = (
+                        rewards[i] + full_traj_bonus
+                        if full_traj_bonus is not None
+                        else rewards[i]
+                    )
+
+                self.seq_obs[path_idx, :path_length] = normed_observations[ptr : i + 1]
+                self.seq_act[path_idx, :path_length] = actions[ptr : i + 1]
+                self.seq_rew[path_idx, :path_length] = rewards[ptr : i + 1][:, None]
 
                 max_start = path_length - (horizon - 1) * stride - 1
-                self.indices += [(path_idx, start, start + (horizon - 1) * stride + 1) for start in range(max_start + 1)]
+                self.indices += [
+                    (path_idx, start, start + (horizon - 1) * stride + 1)
+                    for start in range(max_start + 1)
+                ]
 
                 ptr = i + 1
                 path_idx += 1
 
         self.seq_val[:, -1] = self.seq_rew[:, -1]
-        for i in reversed(range(max_path_length-1)):
-            self.seq_val[:, i] = self.seq_rew[:, i] + discount * self.seq_val[:, i+1]
-        
+        for i in reversed(range(max_path_length - 1)):
+            self.seq_val[:, i] = self.seq_rew[:, i] + discount * self.seq_val[:, i + 1]
+
         print(f"max discounted return: {self.seq_val.max()}")
         print(f"min discounted return: {self.seq_val.min()}")
-        
+
         # val \in [-1, 1]
-        self.seq_val = (self.seq_val - self.seq_val.min()) / (self.seq_val.max() - self.seq_val.min())
+        self.seq_val = (self.seq_val - self.seq_val.min()) / (
+            self.seq_val.max() - self.seq_val.min()
+        )
         if center_mapping:
             self.seq_val = self.seq_val * 2 - 1
         print(f"max normed discounted return: {self.seq_val.max()}")
@@ -438,14 +490,14 @@ class DV_D4RLMuJoCoSeqDataset(BaseDataset):
 
     def __getitem__(self, idx: int):
         path_idx, start, end = self.indices[idx]
-        
-        horizon_state = self.seq_obs[path_idx, start:end:self.stride]
+
+        horizon_state = self.seq_obs[path_idx, start : end : self.stride]
 
         data = {
-            'obs': {'state': horizon_state},
-            'act': self.seq_act[path_idx, start:end:self.stride],
-            'rew': self.seq_rew[path_idx, start:end:self.stride],
-            'val': self.seq_val[path_idx, start],
+            "obs": {"state": horizon_state},
+            "act": self.seq_act[path_idx, start : end : self.stride],
+            "rew": self.seq_rew[path_idx, start : end : self.stride],
+            "val": self.seq_val[path_idx, start],
         }
 
         torch_data = dict_apply(data, torch.tensor)

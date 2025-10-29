@@ -1,11 +1,12 @@
-from typing import Dict, Sequence, Union, Optional
-import numpy as np
-import skimage.transform as st
-import pymunk
-import pygame
-from matplotlib import cm
+from typing import Dict, Optional, Sequence, Union
+
 import cv2
+import numpy as np
+import pygame
+import pymunk
+import skimage.transform as st
 from cleandiffuser.env.pusht.pymunk_override import DrawOptions
+from matplotlib import cm
 
 
 def farthest_point_sampling(points: np.ndarray, n_points: int, init_idx: int):

@@ -1,8 +1,10 @@
-from typing import List, Dict, Optional
-import numpy as np
+from typing import Dict, List, Optional
+
 import gym
+import numpy as np
 from gym.spaces import Box
 from robomimic.envs.env_robosuite import EnvRobosuite
+
 
 class RobomimicLowdimWrapper(gym.Env):
     def __init__(self, 

@@ -23,16 +23,14 @@ import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from absl import logging
-from cleandiffuser.env.block_pushing.utils.pose3d import Pose3d
 import numpy as np
-from scipy.spatial import transform
-import six
-
-
 import pybullet
 import pybullet_data
 import pybullet_utils.bullet_client as bullet_client
+import six
+from absl import logging
+from cleandiffuser.env.block_pushing.utils.pose3d import Pose3d
+from scipy.spatial import transform
 
 Vec3 = Tuple[float, float, float]
 Vec4 = Tuple[float, float, float, float]

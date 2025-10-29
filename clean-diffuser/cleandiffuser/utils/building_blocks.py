@@ -1,17 +1,19 @@
+from typing import List
+
+import einops
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
-import einops
-from typing import List
-from .iql import TwinQ, V
 from cleandiffuser.utils import SinusoidalEmbedding
+
+from .iql import TwinQ, V
 
 IDQLQNet = TwinQ
 IDQLVNet = V
 
 
 class Mlp(nn.Module):
-    """ **Multilayer perceptron.** A simple pytorch MLP module.
+    """**Multilayer perceptron.** A simple pytorch MLP module.
 
     Args:
         in_dim: int,
@@ -27,12 +29,12 @@ class Mlp(nn.Module):
     """
 
     def __init__(
-            self,
-            in_dim: int,
-            hidden_dims: List[int],
-            out_dim: int,
-            activation: nn.Module = nn.ReLU(),
-            out_activation: nn.Module = nn.Identity(),
+        self,
+        in_dim: int,
+        hidden_dims: List[int],
+        out_dim: int,
+        activation: nn.Module = nn.ReLU(),
+        out_activation: nn.Module = nn.Identity(),
     ):
         super().__init__()
         self.mlp = nn.Sequential(
@@ -77,7 +79,7 @@ class GroupNorm1d(nn.Module):
 
 
 class SoftLowerBound(nn.Module):
-    """ Soft lower bound.
+    """Soft lower bound.
 
     Args:
         lower_bound: float,
@@ -93,7 +95,7 @@ class SoftLowerBound(nn.Module):
 
 
 class SoftUpperBound(nn.Module):
-    """ Soft upper bound.
+    """Soft upper bound.
 
     Args:
         upper_bound: float,
@@ -109,7 +111,7 @@ class SoftUpperBound(nn.Module):
 
 
 class DQLCritic(nn.Module):
-    """ **Deep Q-Learning Critic.** A pytorch critic module for DQL. The module incorporates double Q trick.
+    """**Deep Q-Learning Critic.** A pytorch critic module for DQL. The module incorporates double Q trick.
 
     Args:
         obs_dim: int,
@@ -123,16 +125,30 @@ class DQLCritic(nn.Module):
     def __init__(self, obs_dim: int, act_dim: int, hidden_dim: int = 256):
         super().__init__()
         self.q1_model = nn.Sequential(
-            nn.Linear(obs_dim + act_dim, hidden_dim), nn.LayerNorm(hidden_dim), nn.Tanh(),
-            nn.Linear(hidden_dim, hidden_dim), nn.LayerNorm(hidden_dim), nn.Mish(),
-            nn.Linear(hidden_dim, hidden_dim), nn.LayerNorm(hidden_dim), nn.Mish(),
-            nn.Linear(hidden_dim, 1))
+            nn.Linear(obs_dim + act_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.Mish(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.Mish(),
+            nn.Linear(hidden_dim, 1),
+        )
 
         self.q2_model = nn.Sequential(
-            nn.Linear(obs_dim + act_dim, hidden_dim), nn.LayerNorm(hidden_dim), nn.Tanh(),
-            nn.Linear(hidden_dim, hidden_dim), nn.LayerNorm(hidden_dim), nn.Mish(),
-            nn.Linear(hidden_dim, hidden_dim), nn.LayerNorm(hidden_dim), nn.Mish(),
-            nn.Linear(hidden_dim, 1))
+            nn.Linear(obs_dim + act_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.Mish(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.Mish(),
+            nn.Linear(hidden_dim, 1),
+        )
 
     def forward(self, obs, act):
         x = torch.cat([obs, act], dim=-1)
@@ -146,20 +162,29 @@ class DQLCritic(nn.Module):
         q1, q2 = self.forward(obs, act)
         return torch.min(q1, q2)
 
+
 class DVTransformerBlock(nn.Module):
-    def __init__(self, hidden_size: int, n_heads: int, dropout: float = 0.0, norm_type="post"):
+    def __init__(
+        self, hidden_size: int, n_heads: int, dropout: float = 0.0, norm_type="post"
+    ):
         super().__init__()
         self.norm_type = norm_type
-        
+
         self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        self.attn = nn.MultiheadAttention(hidden_size, n_heads, dropout, batch_first=True)
+        self.attn = nn.MultiheadAttention(
+            hidden_size, n_heads, dropout, batch_first=True
+        )
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
 
-        def approx_gelu(): return nn.GELU(approximate="tanh")
+        def approx_gelu():
+            return nn.GELU(approximate="tanh")
 
         self.mlp = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size * 4), approx_gelu(), nn.Dropout(dropout),
-            nn.Linear(hidden_size * 4, hidden_size))
+            nn.Linear(hidden_size, hidden_size * 4),
+            approx_gelu(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size * 4, hidden_size),
+        )
 
     def forward(self, x: torch.Tensor):
         if self.norm_type == "post":
@@ -172,7 +197,8 @@ class DVTransformerBlock(nn.Module):
         else:
             raise NotImplementedError
         return x
-    
+
+
 class DVHorizonCritic(nn.Module):
     def __init__(
         self,
@@ -182,7 +208,7 @@ class DVHorizonCritic(nn.Module):
         n_heads: int = 6,
         depth: int = 12,
         dropout: float = 0.0,
-        norm_type: str = "post"
+        norm_type: str = "post",
     ):
         super().__init__()
         self.in_dim, self.emb_dim = in_dim, emb_dim
@@ -193,7 +219,12 @@ class DVHorizonCritic(nn.Module):
         self.pos_emb = SinusoidalEmbedding(d_model)
         self.pos_emb_cache = None
 
-        self.blocks = nn.ModuleList([DVTransformerBlock(d_model, n_heads, dropout, norm_type) for _ in range(depth)])
+        self.blocks = nn.ModuleList(
+            [
+                DVTransformerBlock(d_model, n_heads, dropout, norm_type)
+                for _ in range(depth)
+            ]
+        )
         self.final_layer = nn.Linear(d_model, 1)
         self.initialize_weights()
 
@@ -223,10 +254,11 @@ class DVHorizonCritic(nn.Module):
         for block in self.blocks:
             x = block(x)
         x = self.final_layer(x)
-        
+
         x = x[:, 0, :]
-        
+
         return x
+
 
 class PreNorm(nn.Module):
     """Layer normalization before the function.
@@ -275,7 +307,7 @@ class FeedForward(nn.Module):
 
 class MultiHeadAttention(nn.Module):
     def __init__(
-            self, d_model: int, nhead: int, dropout: float = 0.1, bias: bool = False
+        self, d_model: int, nhead: int, dropout: float = 0.1, bias: bool = False
     ):
         super().__init__()
         assert d_model % nhead == 0, "`d_model` must be divisible by `nhead`."
@@ -297,9 +329,9 @@ class MultiHeadAttention(nn.Module):
                 mask = mask.unsqueeze(0)
             elif mask.dim() == 3:
                 assert (
-                        mask.shape[0] == q.shape[0]
-                        and mask.shape[1] == q.shape[1]
-                        and mask.shape[2] == k.shape[1]
+                    mask.shape[0] == q.shape[0]
+                    and mask.shape[1] == q.shape[1]
+                    and mask.shape[2] == k.shape[1]
                 )
             else:
                 raise ValueError("`mask` shape should be either (i, j) or (b, i, j)")
@@ -331,14 +363,14 @@ def generate_causal_mask(length: int, device: torch.device = "cpu"):
 
 class Transformer(nn.Module):
     def __init__(
-            self,
-            d_model: int,
-            nhead: int,
-            num_layers: int,
-            hidden_scale: int = 4,
-            attn_dropout: float = 0.0,
-            ffn_dropout: float = 0.0,
-            bias: bool = False,
+        self,
+        d_model: int,
+        nhead: int,
+        num_layers: int,
+        hidden_scale: int = 4,
+        attn_dropout: float = 0.0,
+        ffn_dropout: float = 0.0,
+        bias: bool = False,
     ):
         super().__init__()
         self.layers = nn.ModuleList(

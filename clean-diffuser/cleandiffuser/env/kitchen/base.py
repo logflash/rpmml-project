@@ -1,12 +1,14 @@
-import sys
 import os
+import sys
+
 # hack to import adept envs
 ADEPT_DIR = os.path.join(os.path.dirname(__file__), 'relay_policy_learning', 'adept_envs')
 sys.path.append(ADEPT_DIR)
 
 import logging
-import numpy as np
+
 import adept_envs
+import numpy as np
 from adept_envs.franka.kitchen_multitask_v0 import KitchenTaskRelaxV1
 
 OBS_ELEMENT_INDICES = {

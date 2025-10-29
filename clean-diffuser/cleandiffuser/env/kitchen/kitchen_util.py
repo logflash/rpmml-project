@@ -1,5 +1,7 @@
 import struct
+
 import numpy as np
+
 
 def parse_mjl_logs(read_filename, skipamount):
     with open(read_filename, mode='rb') as file:

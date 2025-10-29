@@ -14,16 +14,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import click
 import glob
 import pickle
-import numpy as np
-from parse_mjl import parse_mjl_logs, viz_parsed_mjl_logs
-from mjrl.utils.gym_env import GymEnv
-import adept_envs
 import time as timer
-import skvideo.io
+
+import adept_envs
+import click
 import gym
+import numpy as np
+import skvideo.io
+from mjrl.utils.gym_env import GymEnv
+from parse_mjl import parse_mjl_logs, viz_parsed_mjl_logs
 
 # headless renderer
 render_buffer = []  # rendering buffer

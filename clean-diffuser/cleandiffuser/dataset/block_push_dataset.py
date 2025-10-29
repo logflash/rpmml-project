@@ -1,11 +1,14 @@
-from typing import Dict
-import torch
-import numpy as np
 import copy
 import pathlib
+from typing import Dict
+
+import numpy as np
+import torch
 from cleandiffuser.dataset.base_dataset import BaseDataset
+from cleandiffuser.dataset.dataset_utils import (EmptyNormalizer,
+                                                 MinMaxNormalizer,
+                                                 SequenceSampler, dict_apply)
 from cleandiffuser.dataset.replay_buffer import ReplayBuffer
-from cleandiffuser.dataset.dataset_utils import SequenceSampler, MinMaxNormalizer, EmptyNormalizer, dict_apply
 
 #  dev/block_pushing/multimodal_push_seed.zarr
 #  ├── data
@@ -14,58 +17,59 @@ from cleandiffuser.dataset.dataset_utils import SequenceSampler, MinMaxNormalize
 #  └── meta
 #      └── episode_ends (1000,) int64
 
+
 class BlockPushDataset(BaseDataset):
-    def __init__(self, 
-            zarr_path, 
-            horizon=1,
-            pad_before=0,
-            pad_after=0,
-            obs_keys=['obs', 'action']
-        ):
+    def __init__(
+        self,
+        zarr_path,
+        horizon=1,
+        pad_before=0,
+        pad_after=0,
+        obs_keys=["obs", "action"],
+    ):
         super().__init__()
-        self.replay_buffer = ReplayBuffer.copy_from_path(
-            zarr_path, keys=obs_keys)
+        self.replay_buffer = ReplayBuffer.copy_from_path(zarr_path, keys=obs_keys)
 
         self.sampler = SequenceSampler(
-            replay_buffer=self.replay_buffer, 
+            replay_buffer=self.replay_buffer,
             sequence_length=horizon,
-            pad_before=pad_before, 
-            pad_after=pad_after)
+            pad_before=pad_before,
+            pad_after=pad_after,
+        )
 
         self.horizon = horizon
         self.pad_before = pad_before
         self.pad_after = pad_after
-        
-        self.normalizer = self.get_normalizer()
-    
-    def get_normalizer(self):
-        state_normalizer = MinMaxNormalizer(self.replay_buffer['obs'][:])  # (N, obs_dim)
-        action_normalizer = MinMaxNormalizer(self.replay_buffer['action'][:])  # (N, action_dim)
 
-        return {
-            "obs": {
-                "state": state_normalizer
-            },
-            "action": action_normalizer
-        }
-        
+        self.normalizer = self.get_normalizer()
+
+    def get_normalizer(self):
+        state_normalizer = MinMaxNormalizer(
+            self.replay_buffer["obs"][:]
+        )  # (N, obs_dim)
+        action_normalizer = MinMaxNormalizer(
+            self.replay_buffer["action"][:]
+        )  # (N, action_dim)
+
+        return {"obs": {"state": state_normalizer}, "action": action_normalizer}
+
     def __str__(self) -> str:
         return f"Keys: {self.replay_buffer.keys()} Steps: {self.replay_buffer.n_steps} Episodes: {self.replay_buffer.n_episodes}"
-    
+
     def __len__(self) -> int:
         return len(self.sampler)
 
     def _sample_to_data(self, sample):
-        state = sample['obs'].astype(np.float32)  # (T, 5)
-        state = self.normalizer['obs']['state'].normalize(state)
-        
-        action = sample['action'].astype(np.float32)  # (T, 2)
-        action = self.normalizer['action'].normalize(action)
+        state = sample["obs"].astype(np.float32)  # (T, 5)
+        state = self.normalizer["obs"]["state"].normalize(state)
+
+        action = sample["action"].astype(np.float32)  # (T, 2)
+        action = self.normalizer["action"].normalize(action)
         data = {
-            'obs': {
-                'state': state, # T, D_o    
+            "obs": {
+                "state": state,  # T, D_o
             },
-            'action': action, # T, D_a
+            "action": action,  # T, D_a
         }
         return data
 

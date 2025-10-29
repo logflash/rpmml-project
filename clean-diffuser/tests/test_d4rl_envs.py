@@ -1,7 +1,8 @@
 import types
 import warnings
-import gym
+
 import d4rl
+import gym
 import pytest
 
 d4rl_env_ids = [
@@ -20,6 +21,7 @@ d4rl_env_ids = [
     "antmaze-large-diverse-v0",
 ]
 
+
 @pytest.mark.parametrize("env_id", d4rl_env_ids)
 def test_d4rl_env(env_id):
     try:
@@ -30,7 +32,3 @@ def test_d4rl_env(env_id):
         assert obs is not None
     except Exception as e:
         pytest.fail(f"Failed to load environment {env_id} with error: {e}")
-
-
-
-

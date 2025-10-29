@@ -1,7 +1,8 @@
-from typing import List, Tuple, Optional, Dict
 import math
-import numpy as np
+from typing import Dict, List, Optional, Tuple
+
 import av
+import numpy as np
 
 
 def get_accumulate_timestamp_idxs(

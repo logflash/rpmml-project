@@ -1,19 +1,18 @@
+import os
 from typing import Optional
 
-import os
 import d4rl
 import gym
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
-
 from cleandiffuser.dataset.d4rl_kitchen_dataset import D4RLKitchenDataset
 from cleandiffuser.dataset.dataset_utils import loop_dataloader
 from cleandiffuser.diffusion import DiscreteDiffusionSDE
 from cleandiffuser.nn_condition import MLPCondition
 from cleandiffuser.nn_diffusion import BaseNNDiffusion
 from cleandiffuser.utils import report_parameters
+from torch.utils.data import DataLoader
 
 
 def modulate(x, shift, scale):
@@ -22,38 +21,51 @@ def modulate(x, shift, scale):
 
 class MixerBlock(nn.Module):
     def __init__(
-            self, seq_len: int = 5, hidden_size: int = 256,
-            dim_s: int = 128, dim_c: int = 1024,
+        self,
+        seq_len: int = 5,
+        hidden_size: int = 256,
+        dim_s: int = 128,
+        dim_c: int = 1024,
     ):
         super().__init__()
         self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
 
         self.mlp1 = nn.Sequential(
-            nn.Conv1d(seq_len, dim_s, 1), nn.GELU('tanh'), nn.Conv1d(dim_s, seq_len, 1))
+            nn.Conv1d(seq_len, dim_s, 1), nn.GELU("tanh"), nn.Conv1d(dim_s, seq_len, 1)
+        )
         self.mlp2 = nn.Sequential(
-            nn.Linear(hidden_size, dim_c), nn.GELU('tanh'), nn.Linear(dim_c, hidden_size))
+            nn.Linear(hidden_size, dim_c),
+            nn.GELU("tanh"),
+            nn.Linear(dim_c, hidden_size),
+        )
 
         self.adaLN_modulation = nn.Sequential(
-            nn.SiLU(), nn.Linear(hidden_size, hidden_size * 6))
+            nn.SiLU(), nn.Linear(hidden_size, hidden_size * 6)
+        )
 
     def forward(self, x: torch.Tensor, emb: torch.Tensor):
-        shift_mlp1, scale_mlp1, gate_mlp1, shift_mlp2, scale_mlp2, gate_mlp2 = self.adaLN_modulation(emb).chunk(6,
-                                                                                                                dim=1)
+        shift_mlp1, scale_mlp1, gate_mlp1, shift_mlp2, scale_mlp2, gate_mlp2 = (
+            self.adaLN_modulation(emb).chunk(6, dim=1)
+        )
         x = modulate(self.norm1(x), shift_mlp1, scale_mlp1)
         x = x + gate_mlp1.unsqueeze(1) * self.mlp1(x)
-        x = x + gate_mlp2.unsqueeze(1) * self.mlp2(modulate(self.norm2(x), shift_mlp2, scale_mlp2))
+        x = x + gate_mlp2.unsqueeze(1) * self.mlp2(
+            modulate(self.norm2(x), shift_mlp2, scale_mlp2)
+        )
         return x
 
 
 class MyMixerNNDiffusion(BaseNNDiffusion):
     def __init__(
-            self,
-            act_dim: int,
-            Ta: int = 8, hidden_size: int = 256,
-            dim_s: int = 128, dim_c: int = 1024,
-            depth: int = 4,
-            timestep_emb_type: str = "positional",
+        self,
+        act_dim: int,
+        Ta: int = 8,
+        hidden_size: int = 256,
+        dim_s: int = 128,
+        dim_c: int = 1024,
+        depth: int = 4,
+        timestep_emb_type: str = "positional",
     ):
         super().__init__(hidden_size, timestep_emb_type)
 
@@ -62,10 +74,20 @@ class MyMixerNNDiffusion(BaseNNDiffusion):
         self.norm = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
 
         self.map_emb = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size), nn.Mish(), nn.Linear(hidden_size, hidden_size), nn.Mish())
+            nn.Linear(hidden_size, hidden_size),
+            nn.Mish(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Mish(),
+        )
 
-        self.mixer_blocks = nn.ModuleList([
-            MixerBlock(seq_len=Ta, hidden_size=hidden_size, dim_s=dim_s, dim_c=dim_c) for _ in range(depth)])
+        self.mixer_blocks = nn.ModuleList(
+            [
+                MixerBlock(
+                    seq_len=Ta, hidden_size=hidden_size, dim_s=dim_s, dim_c=dim_c
+                )
+                for _ in range(depth)
+            ]
+        )
 
         self.initialize_weights()
 
@@ -92,9 +114,12 @@ class MyMixerNNDiffusion(BaseNNDiffusion):
         nn.init.constant_(self.pos_linear.weight, 0)
         nn.init.constant_(self.pos_linear.bias, 0)
 
-    def forward(self,
-                x: torch.Tensor, noise: torch.Tensor,
-                condition: Optional[torch.Tensor] = None):
+    def forward(
+        self,
+        x: torch.Tensor,
+        noise: torch.Tensor,
+        condition: Optional[torch.Tensor] = None,
+    ):
 
         x = self.pre_linear(x)
         emb = self.map_noise(noise)
@@ -121,23 +146,42 @@ if __name__ == "__main__":
 
     # --------------- Network Architecture -----------------
     nn_diffusion = MyMixerNNDiffusion(
-        act_dim, Ta=8, hidden_size=256, dim_s=128, dim_c=1024, depth=4,
-        timestep_emb_type="positional")
-    nn_condition = MLPCondition(obs_dim, 256, [256, ], dropout=0.0)
+        act_dim,
+        Ta=8,
+        hidden_size=256,
+        dim_s=128,
+        dim_c=1024,
+        depth=4,
+        timestep_emb_type="positional",
+    )
+    nn_condition = MLPCondition(
+        obs_dim,
+        256,
+        [
+            256,
+        ],
+        dropout=0.0,
+    )
 
     report_parameters(nn_diffusion)
 
     # --------------- Diffusion Model Actor --------------------
     actor = DiscreteDiffusionSDE(
-        nn_diffusion, nn_condition, predict_noise=False, optim_params={"lr": 3e-4},
-        x_max=+1. * torch.ones((1, act_dim)),
-        x_min=-1. * torch.ones((1, act_dim)),
-        diffusion_steps=50, ema_rate=0.9999, device=device)
+        nn_diffusion,
+        nn_condition,
+        predict_noise=False,
+        optim_params={"lr": 3e-4},
+        x_max=+1.0 * torch.ones((1, act_dim)),
+        x_min=-1.0 * torch.ones((1, act_dim)),
+        diffusion_steps=50,
+        ema_rate=0.9999,
+        device=device,
+    )
 
     # --------------- Training -------------------
     actor.train()
 
-    avg_loss = 0.
+    avg_loss = 0.0
     t = 0
     for batch in loop_dataloader(dataloader):
 
@@ -148,8 +192,8 @@ if __name__ == "__main__":
 
         t += 1
         if (t + 1) % 1000 == 0:
-            print(f'[t={t + 1}] {avg_loss / 1000}')
-            avg_loss = 0.
+            print(f"[t={t + 1}] {avg_loss / 1000}")
+            avg_loss = 0.0
 
         if (t + 1) == 100000:
             break
@@ -167,15 +211,22 @@ if __name__ == "__main__":
     env_eval = gym.vector.make("kitchen-complete-v0", num_envs=50)
     normalizer = dataset.get_normalizer()
 
-    obs, cum_done, cum_rew = env_eval.reset(), 0., 0.
+    obs, cum_done, cum_rew = env_eval.reset(), 0.0, 0.0
     prior = torch.zeros((50, 8, act_dim), device=device)
 
     for t in range(280 // 6):
 
         act, log = actor.sample(
-            prior, solver="ddim", n_samples=50, sample_steps=20,
-            temperature=0.5, w_cfg=1.0,
-            condition_cfg=torch.tensor(normalizer.normalize(obs), device=device, dtype=torch.float32))
+            prior,
+            solver="ddim",
+            n_samples=50,
+            sample_steps=20,
+            temperature=0.5,
+            w_cfg=1.0,
+            condition_cfg=torch.tensor(
+                normalizer.normalize(obs), device=device, dtype=torch.float32
+            ),
+        )
         act = act.cpu().numpy()
 
         for k in range(6):
@@ -183,10 +234,10 @@ if __name__ == "__main__":
             cum_done = np.logical_or(cum_done, done)
             cum_rew += rew
 
-        print(f'[t={t * 6}] cum_rew: {cum_rew}')
+        print(f"[t={t * 6}] cum_rew: {cum_rew}")
 
         if cum_done.all():
             break
 
-    print(f'Mean score: {np.clip(cum_rew, 0., 4.).mean() * 25.}')
+    print(f"Mean score: {np.clip(cum_rew, 0., 4.).mean() * 25.}")
     env_eval.close()

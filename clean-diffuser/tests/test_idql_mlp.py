@@ -1,7 +1,8 @@
 import pytest
 import torch
 import torch.nn as nn
-from cleandiffuser.nn_diffusion.idqlmlp import IDQLMlp, ResidualBlock, BaseNNDiffusion
+from cleandiffuser.nn_diffusion.idqlmlp import (BaseNNDiffusion, IDQLMlp,
+                                                ResidualBlock)
 
 
 def test_residual_block_forward():
@@ -10,31 +11,43 @@ def test_residual_block_forward():
     output = block(x)
     assert output.shape == x.shape
 
+
 def test_idqlmlp_initialization():
-    model = IDQLMlp(obs_dim=10, act_dim=5, emb_dim=64, hidden_dim=256, n_blocks=3, dropout=0.1)
+    model = IDQLMlp(
+        obs_dim=10, act_dim=5, emb_dim=64, hidden_dim=256, n_blocks=3, dropout=0.1
+    )
     assert isinstance(model, BaseNNDiffusion)
     assert isinstance(model.time_mlp, nn.Sequential)
     assert isinstance(model.affine_in, nn.Linear)
     assert isinstance(model.ln_resnet, nn.Sequential)
     assert isinstance(model.affine_out, nn.Linear)
 
+
 def test_idqlmlp_forward():
-    model = IDQLMlp(obs_dim=10, act_dim=5, emb_dim=64, hidden_dim=256, n_blocks=3, dropout=0.1)
+    model = IDQLMlp(
+        obs_dim=10, act_dim=5, emb_dim=64, hidden_dim=256, n_blocks=3, dropout=0.1
+    )
     x = torch.randn(2, 5)
     noise = torch.randn(2)
     condition = torch.randn(2, 10)
     output = model(x, noise, condition)
     assert output.shape == (2, 5)
 
+
 def test_idqlmlp_forward_no_condition():
-    model = IDQLMlp(obs_dim=10, act_dim=5, emb_dim=64, hidden_dim=256, n_blocks=3, dropout=0.1)
+    model = IDQLMlp(
+        obs_dim=10, act_dim=5, emb_dim=64, hidden_dim=256, n_blocks=3, dropout=0.1
+    )
     x = torch.randn(2, 5)
     noise = torch.randn(2)
     output = model(x, noise)
     assert output.shape == (2, 5)
 
+
 def test_idqlmlp_layer_shapes():
-    model = IDQLMlp(obs_dim=10, act_dim=5, emb_dim=64, hidden_dim=256, n_blocks=3, dropout=0.1)
+    model = IDQLMlp(
+        obs_dim=10, act_dim=5, emb_dim=64, hidden_dim=256, n_blocks=3, dropout=0.1
+    )
     x = torch.randn(2, 5)
     noise = torch.randn(2)
     condition = torch.randn(2, 10)

@@ -22,19 +22,18 @@ import time
 from typing import Dict, List, Optional, Tuple, Union
 
 import gym
-from gym import spaces
-from gym.envs import registration
-from cleandiffuser.env.block_pushing.utils import utils_pybullet
-from cleandiffuser.env.block_pushing.utils import xarm_sim_robot
-from cleandiffuser.env.block_pushing.utils.pose3d import Pose3d
-from cleandiffuser.env.block_pushing.utils.utils_pybullet import ObjState
-from cleandiffuser.env.block_pushing.utils.utils_pybullet import XarmState
+import matplotlib.pyplot as plt
 import numpy as np
-from scipy.spatial import transform
 import pybullet
 import pybullet_utils.bullet_client as bullet_client
-
-import matplotlib.pyplot as plt
+from cleandiffuser.env.block_pushing.utils import (utils_pybullet,
+                                                   xarm_sim_robot)
+from cleandiffuser.env.block_pushing.utils.pose3d import Pose3d
+from cleandiffuser.env.block_pushing.utils.utils_pybullet import (ObjState,
+                                                                  XarmState)
+from gym import spaces
+from gym.envs import registration
+from scipy.spatial import transform
 
 BLOCK_URDF_PATH = "third_party/py/envs/assets/block.urdf"
 PLANE_URDF_PATH = "third_party/bullet/examples/pybullet/gym/pybullet_data/" "plane.urdf"

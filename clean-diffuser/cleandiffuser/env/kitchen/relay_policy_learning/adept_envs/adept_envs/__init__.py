@@ -15,5 +15,4 @@
 # limitations under the License.
 
 import adept_envs.franka
-
 from adept_envs.utils.configurable import global_config

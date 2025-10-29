@@ -7,71 +7,52 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run black to test code linting
-        uses: psf/black@stable
-        with:
-          options: "--check --verbose"
-          jupyter: true
-      - name: Run isort to organize imports
-        uses: isort/isort-action@master
+      - uses: ./.github/actions/setup
+      - name: Make scripts executable
+        run: chmod +x run_in_all_packages.sh
+      - name: Run autoformat
+        run: uv run ./run_in_all_packages.sh "bash ./run_autoformat.sh"
+
   linting:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11"]
     steps:
-    - uses: actions/checkout@v4
-    - name: Install uv
-      uses: astral-sh/setup-uv@v3
-      with:
-        enable-cache: true
-        cache-dependency-glob: "pyproject.toml"
-    - name: Set up Python ${{ matrix.python-version }}
-      run: uv python install ${{ matrix.python-version }}    
-    - name: Install the project
-      run: uv sync --all-extras --dev
-    - name: Lint
-      run: |
-        uv run pytest . --pylint -m pylint --pylint-rcfile=.pylintrc
+      - name: Install LAPACK BLAS, and OSMESA
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y liblapack-dev libblas-dev libosmesa6-dev libgl1 libglx-mesa0
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: Make scripts executable
+        run: chmod +x run_in_all_packages.sh
+      - name: Lint
+        run: |
+          uv run ./run_in_all_packages.sh "pytest . --pylint -m pylint --pylint-rcfile=.pylintrc"
+
   static-type-checking:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11"]
     steps:
-    - uses: actions/checkout@v4
-    - name: Install uv
-      uses: astral-sh/setup-uv@v3
-      with:
-        enable-cache: true
-        cache-dependency-glob: "pyproject.toml"
-    - name: Set up Python ${{ matrix.python-version }}
-      run: uv python install ${{ matrix.python-version }}
-    - name: Install the project
-      run: uv sync --all-extras --dev
-    - name: Mypy
-      run: |
-        uv run mypy .
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: Make scripts executable
+        run: chmod +x run_in_all_packages.sh
+      - name: Mypy
+        run: |
+          uv run ./run_in_all_packages.sh "mypy ."
+
   unit-tests:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11"]
     steps:
-    - name: Install LAPACK and BLAS
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y liblapack-dev libblas-dev
-    - uses: actions/checkout@v4
-    - name: Install uv
-      uses: astral-sh/setup-uv@v3
-      with:
-        enable-cache: true
-        cache-dependency-glob: "pyproject.toml"
-    - name: Set up Python ${{ matrix.python-version }}
-      run: uv python install ${{ matrix.python-version }}    
-    - name: Install the project
-      run: uv sync --all-extras --dev
-    - name: Pytest
-      run: |
-       uv run pytest tests/
+      - name: Install LAPACK BLAS, and OSMESA
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y liblapack-dev libblas-dev libosmesa6-dev libgl1 libglx-mesa0
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: Make scripts executable
+        run: chmod +x run_in_all_packages.sh
+      - name: Pytest
+        env:
+          MUJOCO_GL: "osmesa"
+          PYOPENGL_PLATFORM: ""
+        run: |
+          uv run ./run_in_all_packages.sh "pytest tests/"

@@ -15,13 +15,12 @@
 
 """Reach oracle."""
 import numpy as np
+# Only used for debug visualization.
+import pybullet  # pylint: disable=unused-import
 from tf_agents.policies import py_policy
 from tf_agents.trajectories import policy_step
 from tf_agents.trajectories import time_step as ts
 from tf_agents.typing import types
-
-# Only used for debug visualization.
-import pybullet  # pylint: disable=unused-import
 
 
 class ReachOracle(py_policy.PyPolicy):

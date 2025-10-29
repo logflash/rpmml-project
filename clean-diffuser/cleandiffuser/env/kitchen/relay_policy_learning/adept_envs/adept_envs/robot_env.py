@@ -22,8 +22,6 @@ import os
 from typing import Dict, Optional
 
 import numpy as np
-
-
 from adept_envs import mujoco_env
 from adept_envs.base_robot import BaseRobot
 from adept_envs.utils.configurable import import_class_from_path

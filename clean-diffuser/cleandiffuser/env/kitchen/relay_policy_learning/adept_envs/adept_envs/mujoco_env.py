@@ -23,11 +23,10 @@ import time
 from typing import Dict, Optional
 
 import gym
+import numpy as np
+from adept_envs.simulation.sim_robot import MujocoSimRobot, RenderMode
 from gym import spaces
 from gym.utils import seeding
-import numpy as np
-
-from adept_envs.simulation.sim_robot import MujocoSimRobot, RenderMode
 
 DEFAULT_RENDER_SIZE = 480
 

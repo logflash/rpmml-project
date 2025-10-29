@@ -1,8 +1,10 @@
-from typing import Dict, Sequence, Union, Optional
-from gym import spaces
-from cleandiffuser.env.pusht.pusht_env import PushTEnv
-from cleandiffuser.env.pusht.pymunk_keypoint_manager import PymunkKeypointManager
+from typing import Dict, Optional, Sequence, Union
+
 import numpy as np
+from cleandiffuser.env.pusht.pusht_env import PushTEnv
+from cleandiffuser.env.pusht.pymunk_keypoint_manager import \
+    PymunkKeypointManager
+from gym import spaces
 
 
 class PushTKeypointsEnv(PushTEnv):

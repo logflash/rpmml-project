@@ -2,8 +2,8 @@ import pytest
 import torch
 import torch.nn as nn
 from cleandiffuser.nn_diffusion import BaseNNDiffusion
-from cleandiffuser.utils import Mlp
 from cleandiffuser.nn_diffusion.mlps import MlpNNDiffusion
+from cleandiffuser.utils import Mlp
 
 
 def test_mlp_nn_diffusion_forward():
@@ -14,10 +14,7 @@ def test_mlp_nn_diffusion_forward():
 
     # Initialize MlpNNDiffusion instance
     model = MlpNNDiffusion(
-        x_dim=x_dim,
-        emb_dim=emb_dim,
-        hidden_dims=hidden_dims,
-        activation=activation
+        x_dim=x_dim, emb_dim=emb_dim, hidden_dims=hidden_dims, activation=activation
     )
 
     # Create input tensors
@@ -30,10 +27,14 @@ def test_mlp_nn_diffusion_forward():
     output = model(x, noise, condition)
 
     # Check output tensor shape
-    assert output.shape == (batch_size, x_dim), f"Expected output shape (b, {x_dim}), but got {output.shape}"
+    assert output.shape == (
+        batch_size,
+        x_dim,
+    ), f"Expected output shape (b, {x_dim}), but got {output.shape}"
 
     # Check output tensor type
     assert isinstance(output, torch.Tensor), "Output is not a torch.Tensor"
+
 
 def test_mlp_nn_diffusion_forward_without_condition():
     x_dim = 10
@@ -43,10 +44,7 @@ def test_mlp_nn_diffusion_forward_without_condition():
 
     # Initialize MlpNNDiffusion instance
     model = MlpNNDiffusion(
-        x_dim=x_dim,
-        emb_dim=emb_dim,
-        hidden_dims=hidden_dims,
-        activation=activation
+        x_dim=x_dim, emb_dim=emb_dim, hidden_dims=hidden_dims, activation=activation
     )
 
     # Create input tensors
@@ -58,10 +56,14 @@ def test_mlp_nn_diffusion_forward_without_condition():
     output = model(x, noise)
 
     # Check output tensor shape
-    assert output.shape == (batch_size, x_dim), f"Expected output shape (b, {x_dim}), but got {output.shape}"
+    assert output.shape == (
+        batch_size,
+        x_dim,
+    ), f"Expected output shape (b, {x_dim}), but got {output.shape}"
 
     # Check output tensor type
     assert isinstance(output, torch.Tensor), "Output is not a torch.Tensor"
+
 
 def test_mlp_nn_diffusion_forward_with_different_hidden_dims():
     x_dim = 10
@@ -71,10 +73,7 @@ def test_mlp_nn_diffusion_forward_with_different_hidden_dims():
 
     # Initialize MlpNNDiffusion instance
     model = MlpNNDiffusion(
-        x_dim=x_dim,
-        emb_dim=emb_dim,
-        hidden_dims=hidden_dims,
-        activation=activation
+        x_dim=x_dim, emb_dim=emb_dim, hidden_dims=hidden_dims, activation=activation
     )
 
     # Create input tensors
@@ -87,7 +86,10 @@ def test_mlp_nn_diffusion_forward_with_different_hidden_dims():
     output = model(x, noise, condition)
 
     # Check output tensor shape
-    assert output.shape == (batch_size, x_dim), f"Expected output shape (b, {x_dim}), but got {output.shape}"
+    assert output.shape == (
+        batch_size,
+        x_dim,
+    ), f"Expected output shape (b, {x_dim}), but got {output.shape}"
 
     # Check output tensor type
     assert isinstance(output, torch.Tensor), "Output is not a torch.Tensor"

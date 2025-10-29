@@ -1,9 +1,10 @@
-import gym
-from gym import spaces
-import numpy as np
 from collections import defaultdict, deque
+
 import dill
+import gym
+import numpy as np
 from cleandiffuser.env.utils import VideoRecorder
+from gym import spaces
 
 # ------------------ MultiStepWrapper ------------------------
 

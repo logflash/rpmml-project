@@ -42,10 +42,8 @@ __all__ = [
 
 from typing import List, Sequence, Tuple
 
-import pygame
-
 import numpy as np
-
+import pygame
 import pymunk
 from pymunk.space_debug_draw_options import SpaceDebugColor
 from pymunk.vec2d import Vec2d

@@ -1,8 +1,10 @@
-from typing import List, Dict, Optional, Optional
-import numpy as np
+from typing import Dict, List, Optional
+
 import gym
-from gym.spaces import Box
+import numpy as np
 from cleandiffuser.env.kitchen.base import KitchenBase
+from gym.spaces import Box
+
 
 class KitchenLowdimWrapper(gym.Env):
     def __init__(self,

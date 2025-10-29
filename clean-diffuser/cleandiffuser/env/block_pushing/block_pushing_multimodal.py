@@ -16,23 +16,23 @@
 """Multimodal block environments for the XArm."""
 
 import collections
+import copy
 import logging
 import math
-from typing import Dict, List, Optional, Union
-import copy
 import time
+from typing import Dict, List, Optional, Union
 
-from gym import spaces
-from gym.envs import registration
+import numpy as np
+import pybullet
+import pybullet_utils.bullet_client as bullet_client
 from cleandiffuser.env.block_pushing import block_pushing
 from cleandiffuser.env.block_pushing.utils import utils_pybullet
 from cleandiffuser.env.block_pushing.utils.pose3d import Pose3d
-from cleandiffuser.env.block_pushing.utils.utils_pybullet import ObjState
-from cleandiffuser.env.block_pushing.utils.utils_pybullet import XarmState
-import numpy as np
+from cleandiffuser.env.block_pushing.utils.utils_pybullet import (ObjState,
+                                                                  XarmState)
+from gym import spaces
+from gym.envs import registration
 from scipy.spatial import transform
-import pybullet
-import pybullet_utils.bullet_client as bullet_client
 
 # pytype: skip-file
 BLOCK2_URDF_PATH = "third_party/py/envs/assets/block2.urdf"
