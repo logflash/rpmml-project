@@ -1,5 +1,4 @@
 import os
-import sys
 import warnings
 
 import hydra
@@ -16,11 +15,11 @@ import torch.nn as nn
 from cleandiffuser.dataset.dataset_utils import loop_dataloader
 from cleandiffuser.dataset.pusht_dataset import (PushTKeypointDataset,
                                                  PushTStateDataset)
-from cleandiffuser.env import pusht
 from cleandiffuser.env.utils import VideoRecorder
 from cleandiffuser.env.wrapper import MultiStepWrapper, VideoRecordingWrapper
 from cleandiffuser.utils import report_parameters
 from torch.optim.lr_scheduler import CosineAnnealingLR
+
 from utils import Logger, set_seed
 
 

@@ -1,6 +1,5 @@
 import os
 
-import d4rl
 import gym
 import hydra
 import numpy as np
@@ -14,6 +13,7 @@ from cleandiffuser.nn_diffusion import JannerUNet1d
 from cleandiffuser.utils import report_parameters
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
+
 from utils import set_seed
 
 

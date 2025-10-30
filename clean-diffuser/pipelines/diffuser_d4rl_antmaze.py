@@ -1,6 +1,5 @@
 import os
 
-import d4rl
 import gym
 import hydra
 import numpy as np
@@ -67,17 +66,11 @@ def pipeline(args):
         kernel_size=3,
     )
 
-    print(
-        f"======================= Parameter Report of Diffusion Model ======================="
-    )
+    print("======================= Parameter Report of Diffusion Model ==========")
     report_parameters(nn_diffusion)
-    print(
-        f"======================= Parameter Report of Classifier ======================="
-    )
+    print("======================= Parameter Report of Classifier ===============")
     report_parameters(nn_classifier)
-    print(
-        f"=============================================================================="
-    )
+    print("======================================================================")
 
     # --------------- Classifier Guidance --------------------
     classifier = CumRewClassifier(nn_classifier, device=args.device)

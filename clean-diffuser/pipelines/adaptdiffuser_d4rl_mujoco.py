@@ -1,6 +1,5 @@
 import os
 
-import d4rl
 import gym
 import hydra
 import numpy as np
@@ -14,6 +13,7 @@ from cleandiffuser.nn_diffusion import JannerUNet1d
 from cleandiffuser.utils import report_parameters
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
+
 from utils import set_seed
 
 
@@ -69,17 +69,11 @@ def pipeline(args):
         kernel_size=3,
     ).to(args.device)
 
-    print(
-        f"======================= Parameter Report of Diffusion Model ======================="
-    )
+    print("======================= Parameter Report of Diffusion Model =========")
     report_parameters(nn_diffusion)
-    print(
-        f"======================= Parameter Report of Classifier ======================="
-    )
+    print("======================= Parameter Report of Classifier ==============")
     report_parameters(nn_classifier)
-    print(
-        f"=============================================================================="
-    )
+    print("=====================================================================")
 
     # --------------- Classifier Guidance --------------------
     classifier = CumRewClassifier(nn_classifier, device=args.device)

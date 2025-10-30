@@ -1,5 +1,4 @@
 import os
-import sys
 import warnings
 
 import hydra
@@ -12,13 +11,12 @@ import time
 import gym
 import numpy as np
 import torch
-import torch.nn as nn
 from cleandiffuser.dataset.dataset_utils import loop_dataloader
 from cleandiffuser.dataset.pusht_dataset import PushTImageDataset
-from cleandiffuser.env import pusht
 from cleandiffuser.env.utils import VideoRecorder
 from cleandiffuser.env.wrapper import MultiStepWrapper, VideoRecordingWrapper
 from cleandiffuser.utils import report_parameters
+
 from utils import Logger, set_seed
 
 

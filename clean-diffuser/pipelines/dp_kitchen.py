@@ -1,5 +1,4 @@
 import os
-import sys
 import warnings
 
 import hydra
@@ -8,21 +7,16 @@ warnings.filterwarnings("ignore")
 
 import pathlib
 import time
-from datetime import datetime
 
 import gym
 import numpy as np
 import torch
 import torch.nn as nn
 from cleandiffuser.dataset.dataset_utils import loop_dataloader
-from cleandiffuser.dataset.kitchen_dataset import (KitchenDataset,
-                                                   KitchenMjlDataset)
-from cleandiffuser.env import kitchen
-from cleandiffuser.env.kitchen.kitchen_lowdim_wrapper import \
-    KitchenLowdimWrapper
+from cleandiffuser.dataset.kitchen_dataset import KitchenDataset, KitchenMjlDataset
+from cleandiffuser.env.kitchen.kitchen_lowdim_wrapper import KitchenLowdimWrapper
 from cleandiffuser.env.utils import VideoRecorder
 from cleandiffuser.env.wrapper import MultiStepWrapper, VideoRecordingWrapper
-from cleandiffuser.utils import report_parameters
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from utils import Logger, set_seed
 

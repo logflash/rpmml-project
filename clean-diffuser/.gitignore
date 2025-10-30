@@ -23,6 +23,7 @@ log_files_eval/
 mlogger_test.json
 test.py
 test.sh
+tutorials/kitchen/**
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

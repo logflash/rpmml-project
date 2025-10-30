@@ -1,6 +1,6 @@
 import os
+from pathlib import Path
 
-import d4rl
 import gym
 import h5py
 import hydra
@@ -8,7 +8,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 from cleandiffuser.dataset.d4rl_antmaze_dataset import (
-    D4RLAntmazeTDDataset, MultiHorizonD4RLAntmazeDataset)
+    D4RLAntmazeTDDataset,
+    MultiHorizonD4RLAntmazeDataset,
+)
 from cleandiffuser.dataset.dataset_utils import dict_apply, loop_dataloader
 from cleandiffuser.diffusion import ContinuousRectifiedFlow
 from cleandiffuser.invdynamic import FancyMlpInvDynamic
@@ -18,6 +20,8 @@ from cleandiffuser.utils import set_seed
 from cleandiffuser.utils.iql import IQL
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+
+import d4rl
 
 
 class MultiHorizonD4RLAntmazeDatasetwQ(MultiHorizonD4RLAntmazeDataset):
@@ -188,8 +192,10 @@ def pipeline(args):
                 log = dict.fromkeys(["loss_v", "loss_q"], 0.0)
 
             if (n_gradient_step + 1) % args.save_interval == 0:
+                Path(save_path + f"iql_ckpt_{n_gradient_step + 1}.pt").touch()
+                Path(save_path + "iql_ckpt_latest.pt").touch()
                 iql.save(save_path + f"iql_ckpt_{n_gradient_step + 1}.pt")
-                iql.save(save_path + f"iql_ckpt_latest.pt")
+                iql.save(save_path + "iql_ckpt_latest.pt")
 
             n_gradient_step += 1
             if n_gradient_step > 1_000_000:
@@ -198,6 +204,7 @@ def pipeline(args):
     elif args.mode == "training":
 
         iql = IQL(obs_dim, act_dim, hidden_dim=512).to(args.device)
+        Path(save_path + "iql_ckpt_latest.pt").touch()
         iql.load(save_path + "iql_ckpt_latest.pt", device=args.device)
         iql.eval()
 

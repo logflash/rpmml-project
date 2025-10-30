@@ -5,7 +5,7 @@ defaults:
 pipeline_name: diffuserlite_d4rl_antmaze
 # R1: iql_training -> training -> inference (test_model: R1)
 # R2: iql_training -> training -> prepare_dataset -> reflow -> inference (test_model: R2)
-mode: training
+mode: iql_training
 seed: 0
 device: cuda:0
 

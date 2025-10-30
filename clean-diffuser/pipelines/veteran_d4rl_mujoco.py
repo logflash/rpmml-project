@@ -20,12 +20,12 @@ from cleandiffuser.invdynamic import MlpInvDynamic
 from cleandiffuser.nn_classifier import HalfJannerUNet1d
 from cleandiffuser.nn_condition import IdentityCondition, MLPCondition
 from cleandiffuser.nn_diffusion import DiT1d, DVInvMlp, JannerUNet1d
-from cleandiffuser.utils import (DD_RETURN_SCALE, DVHorizonCritic, IDQLVNet,
-                                 report_parameters)
+from cleandiffuser.utils import (DVHorizonCritic, IDQLVNet, report_parameters)
 from omegaconf import OmegaConf
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+
 from utils import set_seed
 
 

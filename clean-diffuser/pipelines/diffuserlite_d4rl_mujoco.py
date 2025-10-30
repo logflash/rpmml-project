@@ -1,6 +1,5 @@
 import os
 
-import d4rl
 import gym
 import h5py
 import hydra

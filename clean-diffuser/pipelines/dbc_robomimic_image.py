@@ -1,5 +1,4 @@
 import os
-import sys
 import warnings
 
 import hydra
@@ -10,10 +9,8 @@ import collections
 import pathlib
 import time
 
-import gym
 import numpy as np
 import torch
-import torch.nn as nn
 from cleandiffuser.dataset.dataset_utils import loop_dataloader
 from cleandiffuser.dataset.robomimic_dataset import RobomimicImageDataset
 from cleandiffuser.env.async_vector_env import AsyncVectorEnv
@@ -23,7 +20,8 @@ from cleandiffuser.env.utils import VideoRecorder
 from cleandiffuser.env.wrapper import MultiStepWrapper, VideoRecordingWrapper
 from cleandiffuser.utils import report_parameters
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from utils import Logger, parse_cfg, set_seed
+
+from utils import Logger, set_seed
 
 
 def make_async_envs(args):

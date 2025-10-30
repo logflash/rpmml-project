@@ -1,7 +1,6 @@
 import os
 import uuid
 
-import d4rl
 import gym
 import hydra
 import numpy as np
@@ -11,20 +10,19 @@ import torch.nn.functional as F
 import wandb
 from cleandiffuser.classifier import CumRewClassifier
 from cleandiffuser.dataset.d4rl_antmaze_dataset import DV_D4RLAntmazeSeqDataset
-from cleandiffuser.dataset.dataset_utils import (loop_dataloader,
-                                                 loop_two_dataloaders)
+from cleandiffuser.dataset.dataset_utils import loop_two_dataloaders
 from cleandiffuser.diffusion import (ContinuousDiffusionSDE,
                                      DiscreteDiffusionSDE)
 from cleandiffuser.invdynamic import MlpInvDynamic
 from cleandiffuser.nn_classifier import HalfJannerUNet1d
 from cleandiffuser.nn_condition import IdentityCondition, MLPCondition
 from cleandiffuser.nn_diffusion import DiT1d, DVInvMlp, JannerUNet1d
-from cleandiffuser.utils import (DD_RETURN_SCALE, DVHorizonCritic,
-                                 report_parameters)
+from cleandiffuser.utils import (DVHorizonCritic, report_parameters)
 from omegaconf import OmegaConf
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+
 from utils import set_seed
 
 

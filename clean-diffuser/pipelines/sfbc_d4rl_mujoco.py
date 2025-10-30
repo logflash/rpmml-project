@@ -1,7 +1,6 @@
 import os
 from typing import Dict
 
-import d4rl
 import gym
 import hydra
 import numpy as np

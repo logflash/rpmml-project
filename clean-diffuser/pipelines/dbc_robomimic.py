@@ -10,7 +10,6 @@ sys.path.append(ROOT_DIR)
 os.chdir(ROOT_DIR)
 import pathlib
 import time
-from datetime import datetime
 
 import gym
 import numpy as np
@@ -24,7 +23,8 @@ from cleandiffuser.env.utils import VideoRecorder
 from cleandiffuser.env.wrapper import MultiStepWrapper, VideoRecordingWrapper
 from cleandiffuser.utils import report_parameters
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from utils import Logger, parse_cfg, set_seed
+
+from utils import Logger, set_seed
 
 
 def make_env(args, idx):
