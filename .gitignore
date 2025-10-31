@@ -1,6 +1,10 @@
 .DS_Store
 .python-version
 
+#tomasz's gitignore adds
+Miniconda3-latest-Linux-x86_64.sh
+/miniconda3
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
