@@ -4,6 +4,12 @@
 #tomasz's gitignore adds
 Miniconda3-latest-Linux-x86_64.sh
 /miniconda3
+/data_trained_models/
+/data_trajectories/
+mmd/data_trajectories/
+mmd/data_trained_models/
+mmd/scripts/inference/results
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
