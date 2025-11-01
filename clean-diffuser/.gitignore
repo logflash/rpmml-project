@@ -1,12 +1,12 @@
 dev_pipelines/
 scripts/
 outputs/
-/results
 /wandb
-*.pt
 # *.ipynb
 *.gif
 *.mp4
+*.TXT
+!antmaze_inference.mp4
 *.out
 *.csv
 datasets/
@@ -155,6 +155,11 @@ cython_debug/
 *.pkl
 *.pickle
 *.pt
+!iql_ckpt_latest.pt
+!invdyn_ckpt_500000.pt
+!diffusion0_ckpt_500000.pt
+!diffusion1_ckpt_500000.pt
+!diffusion2_ckpt_500000.pt
 *.pth
 *.tflite
 *.ckpt
