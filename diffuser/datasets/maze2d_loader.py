@@ -21,35 +21,62 @@ with suppress_output():
 #-------------------------------- general api --------------------------------#
 #-----------------------------------------------------------------------------#
 
+import os
+import collections
+import numpy as np
+import gymnasium as gym
+import minari
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
+
+#-----------------------------------------------------------------------------#
+#------------------------- helper: suppress noisy output ---------------------#
+#-----------------------------------------------------------------------------#
+
+@contextmanager
+def suppress_output():
+    """Redirect stdout/stderr to /dev/null."""
+    with open(os.devnull, "w") as fnull:
+        with redirect_stderr(fnull), redirect_stdout(fnull):
+            yield (fnull, fnull)
+
+#-----------------------------------------------------------------------------#
+#--------------------------- 1. Load environment -----------------------------#
+#-----------------------------------------------------------------------------#
+
 def load_environment(name):
     """
-    Load a PointMaze2D environment from gymnasium-robotics.
-    Example IDs:
-        'PointMaze_UMaze-v3', 'PointMaze_MediumDense-v3', 'PointMaze_LargeDense-v3'
+    Load a Gymnasium-Robotics PointMaze environment by name.
+    Returns an unwrapped environment with metadata set, just like Diffuser expects.
     """
-    if type(name) != str:
+    if not isinstance(name, str):
         return name
+
     with suppress_output():
         wrapped_env = gym.make(name)
+
     env = wrapped_env.unwrapped
     env.max_episode_steps = wrapped_env.spec.max_episode_steps
     env.name = name
     return env
 
+#-----------------------------------------------------------------------------#
+#---------------------------- 2. Get Minari dataset --------------------------#
+#-----------------------------------------------------------------------------#
+
 def get_dataset(env):
     """
-    Return the Minari dataset object corresponding to the PointMaze env.
-    Maps Gymnasium-Robotics env names to D4RL/pointmaze datasets.
+    Map a Gymnasium-Robotics PointMaze env to its corresponding Minari dataset.
+    Returns a MinariDataset object (episodic data container).
     """
     name = env.name.lower()
 
     mapping = {
-        "pointmaze_umaze-v3": "D4RL/pointmaze/umaze-v2",
-        "pointmaze_umazedense-v3": "D4RL/pointmaze/umaze-dense-v2",
-        "pointmaze_medium-v3": "D4RL/pointmaze/medium-v2",
-        "pointmaze_mediumdense-v3": "D4RL/pointmaze/medium-dense-v2",
-        "pointmaze_large-v3": "D4RL/pointmaze/large-v2",
-        "pointmaze_largedense-v3": "D4RL/pointmaze/large-dense-v2",
+        "pointmaze_umaze-v3":        "D4RL/pointmaze/umaze-v2",
+        "pointmaze_umazedense-v3":   "D4RL/pointmaze/umaze-dense-v2",
+        "pointmaze_medium-v3":       "D4RL/pointmaze/medium-v2",
+        "pointmaze_mediumdense-v3":  "D4RL/pointmaze/medium-dense-v2",
+        "pointmaze_large-v3":        "D4RL/pointmaze/large-v2",
+        "pointmaze_largedense-v3":   "D4RL/pointmaze/large-dense-v2",
     }
 
     dataset_name = mapping.get(name)
@@ -59,96 +86,87 @@ def get_dataset(env):
     with suppress_output():
         ds = minari.load_dataset(dataset_name, download=True)
 
-    return ds
+    return ds  # keep episodic structure for sequence_dataset
 
 
 
-def sequence_dataset(env, preprocess_fn):
+
+def sequence_dataset(env, preprocess_fn=lambda x: x):
     """
-    Returns an iterator through trajectories.
-
-    Args:
-        env: A PointMaze env.
-        preprocess_fn: function that expects a D4RL-style dict and returns a dict.
-
-    Yields episode dicts with keys:
-        observations, actions, rewards, terminals, next_observations
+    Returns an iterator over episode dictionaries compatible with Diffuser.
+    Automatically flattens goal-conditioned observations into D4RL-like format.
     """
-    # 1) Get the **dataset object** (Minari)
+
     ds = get_dataset(env)
+    print(f"[Minari] Loaded dataset: {ds.spec.dataset_id}  |  {ds.total_episodes} episodes")
 
-    # 2) Flatten all episodes into a single D4RL-style dict (like env.get_dataset())
-    obs_buf, act_buf, rew_buf, term_buf = [], [], [], []
-    for ep in ds.iterate_episodes():
-        obs_buf.append(ep.observations)
-        act_buf.append(ep.actions)
-        rew_buf.append(ep.rewards)
-        term_buf.append(ep.terminations)
+    for episode in ds.iterate_episodes():
+        obs = episode.observations
+        acts = episode.actions
+        rews = episode.rewards
+        T = len(rews)
 
-    flat = {
-        "observations": np.concatenate(obs_buf),
-        "actions":      np.concatenate(act_buf),
-        "rewards":      np.concatenate(rew_buf),
-        "terminals":    np.concatenate(term_buf),
-    }
+        # Handle dict-style observations (goal-conditioned)
+        if isinstance(obs, dict):
+            # order keys consistently: observation, achieved_goal, desired_goal
+            obs_flat = np.concatenate(
+                [obs[k] for k in ["observation", "achieved_goal", "desired_goal"]],
+                axis=-1,
+            )
+        else:
+            obs_flat = obs
 
-    # 3) Apply your existing preprocessing function (same as before)
-    dataset = preprocess_fn(flat)
+        next_obs_flat = np.concatenate([obs_flat[1:], obs_flat[-1:]], axis=0)
 
-    # 4) Segment back into episodes and yield
-    N = dataset["rewards"].shape[0]
-    data_ = collections.defaultdict(list)
-    episode_step = 0
+        terminals = np.zeros(T, dtype=bool)
+        terminals[-1] = True
+        timeouts = np.zeros(T, dtype=bool)
 
-    for i in range(N):
-        done = bool(dataset["terminals"][i])
-        final_timestep = (episode_step == env.max_episode_steps - 1)
+        ep_data = {
+            "observations": obs_flat,
+            "actions": acts,
+            "rewards": rews,
+            "terminals": terminals,
+            "timeouts": timeouts,
+            "next_observations": next_obs_flat,
+        }
 
-        for k in dataset:
-            if "metadata" in k:
-                continue
-            data_[k].append(dataset[k][i])
+        ep_data = preprocess_fn(ep_data)
+        yield ep_data
 
-        if done or final_timestep:
-            episode_step = 0
-            episode_data = {k: np.array(v) for k, v in data_.items()}
-            if "pointmaze" in env.name.lower():
-                episode_data = process_pointmaze2d_episode(episode_data)
-            yield episode_data
-            data_.clear()
-
-        episode_step += 1
 
 #-----------------------------------------------------------------------------#
 #------------------------------ pointmaze2d fixes -----------------------------#
 #-----------------------------------------------------------------------------#
-
-def process_pointmaze2d_episode(episode):
-    """Adds 'next_observations' field to a PointMaze2D episode."""
-    assert "next_observations" not in episode
-    next_obs = episode["observations"][1:].copy()
-    for key, val in episode.items():
-        episode[key] = val[:-1]
-    episode["next_observations"] = next_obs
-    return episode
-
-#-----------------------------------------------------------------------------#
-#------------------------------------- main ----------------------------------#
-#-----------------------------------------------------------------------------#
-
 if __name__ == "__main__":
-    def identity_preprocess(d): return d
 
+    def identity_preprocess(d): 
+        return d
+
+    # Load environment
     env = load_environment("PointMaze_MediumDense-v3")
     print(f"Loaded env: {env.name} | max_steps={env.max_episode_steps}")
 
-    ds_obj = get_dataset(env)  # Minari dataset object
+    # Load dataset
+    ds_obj = get_dataset(env)
     print(f"Minari dataset loaded with {ds_obj.total_episodes} episodes")
 
+    # Iterate through one episode to inspect
     for ep in sequence_dataset(env, identity_preprocess):
-        print("Episode keys:", list(ep.keys()))
+        print("\nEpisode keys:", list(ep.keys()))
         print("Episode length:", len(ep["actions"]))
-        print("First obs:", ep["observations"][0])
-        print("First act:", ep["actions"][0])
-        break
 
+        print("\nFirst 5 observations (flattened):")
+        for i in range(5):
+            o = ep["observations"][i]
+            print(
+                f"t={i}: pos=({o[0]:.3f}, {o[1]:.3f}), vel=({o[2]:.3f}, {o[3]:.3f}), "
+                f"ach=({o[4]:.3f}, {o[5]:.3f}), goal=({o[6]:.3f}, {o[7]:.3f})"
+            )
+
+        print("\nFirst 5 actions (accelerations):")
+        print(ep["actions"][:5])
+
+        print("\nFirst 5 rewards:")
+        print(ep["rewards"][:5])
+        break
