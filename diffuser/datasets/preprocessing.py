@@ -117,7 +117,7 @@ if __name__ == "__main__":
     # build preprocess function pipeline
     preprocess = compose(
         arctanh_actions(env),
-        add_pointmaze_deltas(env),
+        add_deltas(env),
     )
 
     # take the first episode

@@ -4,6 +4,8 @@ import torch
 import pdb
 
 # Try relative imports (package mode)
+# man idk this is a mish mash of imports but it was working when i was calling the script 
+# but not when running main and this fixed it let this shitty code be pls
 try:
     from . import preprocessing
     from .preprocessing import get_preprocess_fn
@@ -31,12 +33,12 @@ class SequenceDataset(torch.utils.data.Dataset):
         normalizer='LimitsNormalizer', preprocess_fns=[], max_path_length=1000,
         max_n_episodes=10000, termination_penalty=0, use_padding=True, seed=None):
         self.preprocess_fn = get_preprocess_fn(preprocess_fns, env)
-        self.env = env = load_environment(env) # this will be fixed when Tomasz gives me what i need
+        self.env = env = load_environment(env) 
         self.env.reset(seed=seed)
         self.horizon = horizon
         self.max_path_length = max_path_length
         self.use_padding = use_padding
-        itr = sequence_dataset(env, self.preprocess_fn) # this will be fixed when Tomasz gives me what i need
+        itr = sequence_dataset(env, self.preprocess_fn) 
 
         fields = ReplayBuffer(max_n_episodes, max_path_length, termination_penalty)
         for i, episode in enumerate(itr):

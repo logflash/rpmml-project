@@ -1,7 +1,6 @@
 # environments/maze2d_env.py
 """
-Skeleton of a Maze2D environment for DiffuserLite-style planning.
-Your partner can later populate the logic for reset(), step(), render(), etc.
+We dont really need this we just use the basic env
 """
 
 import gymnasium as gym
