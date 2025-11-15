@@ -1,7 +1,7 @@
 from gymnasium.envs.registration import register
 from typing import Literal
 
-def register_pointmaze_environments() -> Literal[True]:
+def register_environments() -> Literal[True]:
     """
     Registers the simple PointMaze environments:
         - PointMaze_UMaze-v3 / PointMaze_UMazeDense-v3

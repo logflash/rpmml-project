@@ -1,297 +1,131 @@
+# pointmaze_preprocessing.py
 import numpy as np
-import einops
-from scipy.spatial.transform import Rotation as R
 
-from .maze2d_loader import load_environment
-
-#-----------------------------------------------------------------------------#
-#-------------------------------- general api --------------------------------#
-#-----------------------------------------------------------------------------#
+# -----------------------------------------------------------------------------#
+#                                general helpers                               #
+# -----------------------------------------------------------------------------#
 
 def compose(*fns):
-
+    """
+    Compose multiple preprocessing functions together.
+    dataset → f1 → f2 → f3 → dataset
+    """
     def _fn(x):
         for fn in fns:
             x = fn(x)
         return x
-
     return _fn
 
+
 def get_preprocess_fn(fn_names, env):
+    """
+    fn_names : list of strings
+    each string names a function below (e.g. "arctanh_actions")
+    """
     fns = [eval(name)(env) for name in fn_names]
     return compose(*fns)
 
-def get_policy_preprocess_fn(fn_names):
-    fns = [eval(name) for name in fn_names]
-    return compose(*fns)
 
-#-----------------------------------------------------------------------------#
-#-------------------------- preprocessing functions --------------------------#
-#-----------------------------------------------------------------------------#
-
-#------------------------ @TODO: remove some of these ------------------------#
+# -----------------------------------------------------------------------------#
+#                           PointMaze-specific functions                        #
+# -----------------------------------------------------------------------------#
 
 def arctanh_actions(*args, **kwargs):
-    epsilon = 1e-4
+    """
+    Convert actions from [-1,1] → (-∞,∞) using arctanh.
+    Diffuser models tanh outputs, so training data should be arctanh-transformed.
+    """
+    epsilon = 1e-4  # avoid numerical issues near ±1
 
     def _fn(dataset):
-        actions = dataset['actions']
+        actions = dataset["actions"]
         assert actions.min() >= -1 and actions.max() <= 1, \
-            f'applying arctanh to actions in range [{actions.min()}, {actions.max()}]'
-        actions = np.clip(actions, -1 + epsilon, 1 - epsilon)
-        dataset['actions'] = np.arctanh(actions)
+            f"[preprocessing] arctanh_actions received out-of-range actions!"
+
+        clipped = np.clip(actions, -1 + epsilon, 1 - epsilon)
+        dataset["actions"] = np.arctanh(clipped)
         return dataset
 
     return _fn
+
 
 def add_deltas(env):
+    """
+    Compute transition deltas for PointMaze observations.
+
+    PointMaze flattened obs format is:
+        [x, y, vx, vy, achieved_x, achieved_y, goal_x, goal_y]
+
+    We compute:
+        pos_delta  = next_pos - pos
+        vel_delta  = next_vel - vel
+        ach_delta  = next_ach - ach
+        goal_delta = next_goal - goal (usually 0)
+        whole_delta = next_obs - obs
+
+    All deltas are concatenated for richer modeling.
+    """
 
     def _fn(dataset):
-        deltas = dataset['next_observations'] - dataset['observations']
-        dataset['deltas'] = deltas
-        return dataset
+        obs  = dataset["observations"]
+        next_obs = dataset["next_observations"]
 
-    return _fn
+        # full delta
+        deltas_full = next_obs - obs
 
+        # break into components for inspection or ablations
+        pos      = obs[:, :2]
+        next_pos = next_obs[:, :2]
+        vel      = obs[:, 2:4]
+        next_vel = next_obs[:, 2:4]
+        ach      = obs[:, 4:6]
+        next_ach = next_obs[:, 4:6]
+        goal      = obs[:, 6:8]
+        next_goal = next_obs[:, 6:8]
 
-def maze2d_set_terminals(env):
-    env = load_environment(env) if type(env) == str else env
-    goal = np.array(env._target)
-    threshold = 0.5
+        deltas_pos  = next_pos  - pos
+        deltas_vel  = next_vel  - vel
+        deltas_ach  = next_ach  - ach
+        deltas_goal = next_goal - goal  # usually zero except resets
 
-    def _fn(dataset):
-        xy = dataset['observations'][:,:2]
-        distances = np.linalg.norm(xy - goal, axis=-1)
-        at_goal = distances < threshold
-        timeouts = np.zeros_like(dataset['timeouts'])
-
-        ## timeout at time t iff
-        ##      at goal at time t and
-        ##      not at goal at time t + 1
-        timeouts[:-1] = at_goal[:-1] * ~at_goal[1:]
-
-        timeout_steps = np.where(timeouts)[0]
-        path_lengths = timeout_steps[1:] - timeout_steps[:-1]
-
-        print(
-            f'[ utils/preprocessing ] Segmented {env.name} | {len(path_lengths)} paths | '
-            f'min length: {path_lengths.min()} | max length: {path_lengths.max()}'
-        )
-
-        dataset['timeouts'] = timeouts
-        return dataset
-
-    return _fn
-
-
-#-------------------------- block-stacking --------------------------#
-
-def blocks_quat_to_euler(observations):
-    '''
-        input : [ N x robot_dim + n_blocks * 8 ] = [ N x 39 ]
-            xyz: 3
-            quat: 4
-            contact: 1
-
-        returns : [ N x robot_dim + n_blocks * 10] = [ N x 47 ]
-            xyz: 3
-            sin: 3
-            cos: 3
-            contact: 1
-    '''
-    robot_dim = 7
-    block_dim = 8
-    n_blocks = 4
-    assert observations.shape[-1] == robot_dim + n_blocks * block_dim
-
-    X = observations[:, :robot_dim]
-
-    for i in range(n_blocks):
-        start = robot_dim + i * block_dim
-        end = start + block_dim
-
-        block_info = observations[:, start:end]
-
-        xpos = block_info[:, :3]
-        quat = block_info[:, 3:-1]
-        contact = block_info[:, -1:]
-
-        euler = R.from_quat(quat).as_euler('xyz')
-        sin = np.sin(euler)
-        cos = np.cos(euler)
-
-        X = np.concatenate([
-            X,
-            xpos,
-            sin,
-            cos,
-            contact,
-        ], axis=-1)
-
-    return X
-
-def blocks_euler_to_quat_2d(observations):
-    robot_dim = 7
-    block_dim = 10
-    n_blocks = 4
-
-    assert observations.shape[-1] == robot_dim + n_blocks * block_dim
-
-    X = observations[:, :robot_dim]
-
-    for i in range(n_blocks):
-        start = robot_dim + i * block_dim
-        end = start + block_dim
-
-        block_info = observations[:, start:end]
-
-        xpos = block_info[:, :3]
-        sin = block_info[:, 3:6]
-        cos = block_info[:, 6:9]
-        contact = block_info[:, 9:]
-
-        euler = np.arctan2(sin, cos)
-        quat = R.from_euler('xyz', euler, degrees=False).as_quat()
-
-        X = np.concatenate([
-            X,
-            xpos,
-            quat,
-            contact,
-        ], axis=-1)
-
-    return X
-
-def blocks_euler_to_quat(paths):
-    return np.stack([
-        blocks_euler_to_quat_2d(path)
-        for path in paths
-    ], axis=0)
-
-def blocks_process_cubes(env):
-
-    def _fn(dataset):
-        for key in ['observations', 'next_observations']:
-            dataset[key] = blocks_quat_to_euler(dataset[key])
-        return dataset
-
-    return _fn
-
-def blocks_remove_kuka(env):
-
-    def _fn(dataset):
-        for key in ['observations', 'next_observations']:
-            dataset[key] = dataset[key][:, 7:]
-        return dataset
-
-    return _fn
-
-def blocks_add_kuka(observations):
-    '''
-        observations : [ batch_size x horizon x 32 ]
-    '''
-    robot_dim = 7
-    batch_size, horizon, _ = observations.shape
-    observations = np.concatenate([
-        np.zeros((batch_size, horizon, 7)),
-        observations,
-    ], axis=-1)
-    return observations
-
-def blocks_cumsum_quat(deltas):
-    '''
-        deltas : [ batch_size x horizon x transition_dim ]
-    '''
-    robot_dim = 7
-    block_dim = 8
-    n_blocks = 4
-    assert deltas.shape[-1] == robot_dim + n_blocks * block_dim
-
-    batch_size, horizon, _ = deltas.shape
-
-    cumsum = deltas.cumsum(axis=1)
-    for i in range(n_blocks):
-        start = robot_dim + i * block_dim + 3
-        end = start + 4
-
-        quat = deltas[:, :, start:end].copy()
-
-        quat = einops.rearrange(quat, 'b h q -> (b h) q')
-        euler = R.from_quat(quat).as_euler('xyz')
-        euler = einops.rearrange(euler, '(b h) e -> b h e', b=batch_size)
-        cumsum_euler = euler.cumsum(axis=1)
-
-        cumsum_euler = einops.rearrange(cumsum_euler, 'b h e -> (b h) e')
-        cumsum_quat = R.from_euler('xyz', cumsum_euler).as_quat()
-        cumsum_quat = einops.rearrange(cumsum_quat, '(b h) q -> b h q', b=batch_size)
-
-        cumsum[:, :, start:end] = cumsum_quat.copy()
-
-    return cumsum
-
-def blocks_delta_quat_helper(observations, next_observations):
-    '''
-        input : [ N x robot_dim + n_blocks * 8 ] = [ N x 39 ]
-            xyz: 3
-            quat: 4
-            contact: 1
-    '''
-    robot_dim = 7
-    block_dim = 8
-    n_blocks = 4
-    assert observations.shape[-1] == next_observations.shape[-1] == robot_dim + n_blocks * block_dim
-
-    deltas = (next_observations - observations)[:, :robot_dim]
-
-    for i in range(n_blocks):
-        start = robot_dim + i * block_dim
-        end = start + block_dim
-
-        block_info = observations[:, start:end]
-        next_block_info = next_observations[:, start:end]
-
-        xpos = block_info[:, :3]
-        next_xpos = next_block_info[:, :3]
-
-        quat = block_info[:, 3:-1]
-        next_quat = next_block_info[:, 3:-1]
-
-        contact = block_info[:, -1:]
-        next_contact = next_block_info[:, -1:]
-
-        delta_xpos = next_xpos - xpos
-        delta_contact = next_contact - contact
-
-        rot = R.from_quat(quat)
-        next_rot = R.from_quat(next_quat)
-
-        delta_quat = (next_rot * rot.inv()).as_quat()
-        w = delta_quat[:, -1:]
-
-        ## make w positive to avoid [0, 0, 0, -1]
-        delta_quat = delta_quat * np.sign(w)
-
-        ## apply rot then delta to ensure we end at next_rot
-        ## delta * rot = next_rot * rot' * rot = next_rot
-        next_euler = next_rot.as_euler('xyz')
-        next_euler_check = (R.from_quat(delta_quat) * rot).as_euler('xyz')
-        assert np.allclose(next_euler, next_euler_check)
-
+        # concatenate everything (Diffuser likes a single vector)
         deltas = np.concatenate([
-            deltas,
-            delta_xpos,
-            delta_quat,
-            delta_contact,
+            deltas_pos,
+            deltas_vel,
+            deltas_ach,
+            deltas_goal,
+            deltas_full,
         ], axis=-1)
 
-    return deltas
-
-def blocks_add_deltas(env):
-
-    def _fn(dataset):
-        deltas = blocks_delta_quat_helper(dataset['observations'], dataset['next_observations'])
-        # deltas = dataset['next_observations'] - dataset['observations']
-        dataset['deltas'] = deltas
+        dataset["deltas"] = deltas
         return dataset
 
     return _fn
+
+
+# -----------------------------------------------------------------------------#
+#                                 Example usage                                #
+# -----------------------------------------------------------------------------#
+
+if __name__ == "__main__":
+    # Dummy example for sanity check
+
+    from maze2d_loader import load_environment, sequence_dataset
+
+    env = load_environment("PointMaze_MediumDense-v3")
+
+    # build preprocess function pipeline
+    preprocess = compose(
+        arctanh_actions(env),
+        add_pointmaze_deltas(env),
+    )
+
+    # take the first episode
+    episode = next(sequence_dataset(env, lambda x: x))
+    processed = preprocess(episode)
+
+    print("Original obs shape:  ", episode["observations"].shape)
+    print("Original act shape:  ", episode["actions"].shape)
+    print("Delta shape:         ", processed["deltas"].shape)
+    print("Example delta row:   ", processed["deltas"][0])
+    print("✓ PointMaze preprocessing OK")

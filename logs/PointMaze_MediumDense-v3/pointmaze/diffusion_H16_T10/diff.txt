@@ -1,0 +1,1501 @@
+diff --git a/config/locomotion.py b/config/locomotion.py
+deleted file mode 100644
+index 8bab81a..0000000
+--- a/config/locomotion.py
++++ /dev/null
+@@ -1,151 +0,0 @@
+-import socket
+-
+-from diffuser.utils import watch
+-
+-#------------------------ base ------------------------#
+-
+-## automatically make experiment names for planning
+-## by labelling folders with these args
+-
+-args_to_watch = [
+-    ('prefix', ''),
+-    ('horizon', 'H'),
+-    ('n_diffusion_steps', 'T'),
+-    ## value kwargs
+-    ('discount', 'd'),
+-]
+-
+-logbase = 'logs'
+-
+-base = {
+-    'diffusion': {
+-        ## model
+-        'model': 'models.TemporalUnet',
+-        'diffusion': 'models.GaussianDiffusion',
+-        'horizon': 32,
+-        'n_diffusion_steps': 20,
+-        'action_weight': 10,
+-        'loss_weights': None,
+-        'loss_discount': 1,
+-        'predict_epsilon': False,
+-        'dim_mults': (1, 2, 4, 8),
+-        'attention': False,
+-        'renderer': 'utils.MuJoCoRenderer',
+-
+-        ## dataset
+-        'loader': 'datasets.SequenceDataset',
+-        'normalizer': 'GaussianNormalizer',
+-        'preprocess_fns': [],
+-        'clip_denoised': False,
+-        'use_padding': True,
+-        'max_path_length': 1000,
+-
+-        ## serialization
+-        'logbase': logbase,
+-        'prefix': 'diffusion/defaults',
+-        'exp_name': watch(args_to_watch),
+-
+-        ## training
+-        'n_steps_per_epoch': 10000,
+-        'loss_type': 'l2',
+-        'n_train_steps': 1e6,
+-        'batch_size': 32,
+-        'learning_rate': 2e-4,
+-        'gradient_accumulate_every': 2,
+-        'ema_decay': 0.995,
+-        'save_freq': 20000,
+-        'sample_freq': 20000,
+-        'n_saves': 5,
+-        'save_parallel': False,
+-        'n_reference': 8,
+-        'bucket': None,
+-        'device': 'cuda',
+-        'seed': None,
+-    },
+-
+-    'values': {
+-        'model': 'models.ValueFunction',
+-        'diffusion': 'models.ValueDiffusion',
+-        'horizon': 32,
+-        'n_diffusion_steps': 20,
+-        'dim_mults': (1, 2, 4, 8),
+-        'renderer': 'utils.MuJoCoRenderer',
+-
+-        ## value-specific kwargs
+-        'discount': 0.99,
+-        'termination_penalty': -100,
+-        'normed': False,
+-
+-        ## dataset
+-        'loader': 'datasets.ValueDataset',
+-        'normalizer': 'GaussianNormalizer',
+-        'preprocess_fns': [],
+-        'use_padding': True,
+-        'max_path_length': 1000,
+-
+-        ## serialization
+-        'logbase': logbase,
+-        'prefix': 'values/defaults',
+-        'exp_name': watch(args_to_watch),
+-
+-        ## training
+-        'n_steps_per_epoch': 10000,
+-        'loss_type': 'value_l2',
+-        'n_train_steps': 200e3,
+-        'batch_size': 32,
+-        'learning_rate': 2e-4,
+-        'gradient_accumulate_every': 2,
+-        'ema_decay': 0.995,
+-        'save_freq': 1000,
+-        'sample_freq': 0,
+-        'n_saves': 5,
+-        'save_parallel': False,
+-        'n_reference': 8,
+-        'bucket': None,
+-        'device': 'cuda',
+-        'seed': None,
+-    },
+-
+-    'plan': {
+-        'guide': 'sampling.ValueGuide',
+-        'policy': 'sampling.GuidedPolicy',
+-        'max_episode_length': 1000,
+-        'batch_size': 64,
+-        'preprocess_fns': [],
+-        'device': 'cuda',
+-        'seed': None,
+-
+-        ## sample_kwargs
+-        'n_guide_steps': 2,
+-        'scale': 0.1,
+-        't_stopgrad': 2,
+-        'scale_grad_by_std': True,
+-
+-        ## serialization
+-        'loadbase': None,
+-        'logbase': logbase,
+-        'prefix': 'plans/',
+-        'exp_name': watch(args_to_watch),
+-        'vis_freq': 100,
+-        'max_render': 8,
+-
+-        ## diffusion model
+-        'horizon': 32,
+-        'n_diffusion_steps': 20,
+-
+-        ## value function
+-        'discount': 0.997,
+-
+-        ## loading
+-        'diffusion_loadpath': 'f:diffusion/defaults_H{horizon}_T{n_diffusion_steps}',
+-        'value_loadpath': 'f:values/defaults_H{horizon}_T{n_diffusion_steps}_d{discount}',
+-
+-        'diffusion_epoch': 'latest',
+-        'value_epoch': 'latest',
+-
+-        'verbose': True,
+-        'suffix': '0',
+-    },
+-}
+-
+-
+diff --git a/diffuser/datasets/maze2d_loader.py b/diffuser/datasets/maze2d_loader.py
+index 4465a52..8c048f2 100644
+--- a/diffuser/datasets/maze2d_loader.py
++++ b/diffuser/datasets/maze2d_loader.py
+@@ -93,48 +93,88 @@ def get_dataset(env):
+ 
+ def sequence_dataset(env, preprocess_fn=lambda x: x):
+     """
+-    Returns an iterator over episode dictionaries compatible with Diffuser.
+-    Automatically flattens goal-conditioned observations into D4RL-like format.
++    Iterates over Minari PointMaze episodes and produces D4RL-style episodes
++    with consistent lengths across observations, actions, rewards, and terminals.
+     """
+ 
+     ds = get_dataset(env)
+     print(f"[Minari] Loaded dataset: {ds.spec.dataset_id}  |  {ds.total_episodes} episodes")
+ 
+     for episode in ds.iterate_episodes():
+-        obs = episode.observations
+-        acts = episode.actions
+-        rews = episode.rewards
+-        T = len(rews)
+ 
+-        # Handle dict-style observations (goal-conditioned)
++        # --------------------------
++        # 1. Load raw episode fields
++        # --------------------------
++        obs = episode.observations              # length T
++        acts = episode.actions                  # length T-1
++        rews = episode.rewards                  # length T-1
++        terms = episode.terminations            # length T-1
++
++        # Transition count is defined by actions (T-1)
++        T = len(acts)
++        #print("actions:", len(acts))
++
+         if isinstance(obs, dict):
+-            # order keys consistently: observation, achieved_goal, desired_goal
++            #print("obs timesteps:", len(obs["observation"]))
++            obs_len = len(obs["observation"])
++        else:
++            #print("obs timesteps:", len(obs))
++            obs_len = len(obs)
++
++        assert obs_len == T + 1, f"PointMaze obs should be T+1 long (got {obs_len}, expected {T+1})"
++
++
++        # --------------------------
++        # 2. Flatten goal observations
++        # --------------------------
++        if isinstance(obs, dict):
++            # produces shape (T+1, obs_dim + 2 + 2)
+             obs_flat = np.concatenate(
+-                [obs[k] for k in ["observation", "achieved_goal", "desired_goal"]],
+-                axis=-1,
++                [
++                    obs["observation"],      # (T+1,4)
++                    obs["achieved_goal"],    # (T+1,2)
++                    obs["desired_goal"],     # (T+1,2)
++                ],
++                axis=-1
+             )
+         else:
+             obs_flat = obs
+ 
+-        next_obs_flat = np.concatenate([obs_flat[1:], obs_flat[-1:]], axis=0)
++        # ---------------------------
++        # 3. Build next_observations
++        # ---------------------------
++        # Next observations should align with actions → length T
++        next_obs_flat = obs_flat[1:T+1]      # shape (T, obs_dim)
++        obs_flat = obs_flat[:T]              # shape (T, obs_dim)
++
++        # ---------------------------
++        # 4. Truncate rewards/terms
++        # ---------------------------
++        rews = rews[:T]
++        terms = terms[:T]
+ 
+-        terminals = np.zeros(T, dtype=bool)
+-        terminals[-1] = True
++        # No timeouts in Minari → just zeros
+         timeouts = np.zeros(T, dtype=bool)
+ 
++        # ---------------------------
++        # 5. Pack episode
++        # ---------------------------
+         ep_data = {
+-            "observations": obs_flat,
+-            "actions": acts,
+-            "rewards": rews,
+-            "terminals": terminals,
+-            "timeouts": timeouts,
++            "observations":      obs_flat,
++            "actions":           acts,
++            "rewards":           rews,
++            "terminals":         terms,
++            "timeouts":          timeouts,
+             "next_observations": next_obs_flat,
+         }
+ 
++        # optional preprocessing (normalizers, deltas, etc.)
+         ep_data = preprocess_fn(ep_data)
++
+         yield ep_data
+ 
+ 
++
+ #-----------------------------------------------------------------------------#
+ #------------------------------ pointmaze2d fixes -----------------------------#
+ #-----------------------------------------------------------------------------#
+@@ -155,10 +195,11 @@ if __name__ == "__main__":
+     for ep in sequence_dataset(env, identity_preprocess):
+         print("\nEpisode keys:", list(ep.keys()))
+         print("Episode length:", len(ep["actions"]))
+-
++        print("observation length", len(ep["observations"]))
++        print("observation length", len(ep["rewards"]))
+         print("\nFirst 5 observations (flattened):")
+-        for i in range(5):
+-            o = ep["observations"][i]
++        for i in range(1,6):
++            o = ep["observations"][-1*i]
+             print(
+                 f"t={i}: pos=({o[0]:.3f}, {o[1]:.3f}), vel=({o[2]:.3f}, {o[3]:.3f}), "
+                 f"ach=({o[4]:.3f}, {o[5]:.3f}), goal=({o[6]:.3f}, {o[7]:.3f})"
+@@ -169,4 +210,5 @@ if __name__ == "__main__":
+ 
+         print("\nFirst 5 rewards:")
+         print(ep["rewards"][:5])
+-        break
+\ No newline at end of file
++        break
++        
+\ No newline at end of file
+diff --git a/diffuser/datasets/normalization.py b/diffuser/datasets/normalization.py
+index d6f9620..cc7f3ca 100644
+--- a/diffuser/datasets/normalization.py
++++ b/diffuser/datasets/normalization.py
+@@ -1,38 +1,77 @@
+ import numpy as np
+-import scipy.interpolate as interpolate
+ 
++# --------------------------------------------------------------------------- #
++# Helper: convert ReplayBuffer into episodic dict-of-lists (Diffuser expects)
++# --------------------------------------------------------------------------- #
+ 
++def _replaybuffer_to_episodic(rb):
++    """
++    Convert padded ReplayBuffer arrays into episodic lists of arrays.
+ 
+-#-----------------------------------------------------------------------------#
+-#--------------------------- multi-field normalizer --------------------------#
+-#-----------------------------------------------------------------------------#
++    Input (ReplayBuffer):
++        rb[key] = (num_eps, max_path_len, dim)
++
++    Output (episodic dict):
++        episodic[key] = [ arr_ep0(T0,dim), arr_ep1(T1,dim), ... ]
++    """
++    n = rb.n_episodes
++    lengths = rb.path_lengths   # list/array of true episode lengths
++
++    episodic = {}
++    for key, arr in rb.items():   # arr shape = (n, max_len, dim)
++        episodic[key] = [
++            arr[i, :lengths[i]] for i in range(n)
++        ]
++
++    return episodic
++
++
++# --------------------------------------------------------------------------- #
++#                           DatasetNormalizer                                 #
++# --------------------------------------------------------------------------- #
+ 
+ class DatasetNormalizer:
+ 
+     def __init__(self, dataset, normalizer, path_lengths=None):
++        """
++        dataset may be:
++            (1) a dict mapping key -> list of variable-length episode arrays, OR
++            (2) a ReplayBuffer object with padded arrays.
++
++        This class ensures dataset is converted into episodic form BEFORE
++        calling Diffuser's flatten().
++        """
++
++        # ------------------------------------------------------------
++        # Detect ReplayBuffer and convert to episodic dict-of-lists
++        # ------------------------------------------------------------
++        if hasattr(dataset, "n_episodes") and hasattr(dataset, "path_lengths"):
++            print("[Normalizer] Converting ReplayBuffer → episodic representation")
++            dataset = _replaybuffer_to_episodic(dataset)
++
++        # Now 'dataset' is episodic dict-of-lists.
+         dataset = flatten(dataset, path_lengths)
+ 
++        # Save dims
+         self.observation_dim = dataset['observations'].shape[1]
+         self.action_dim = dataset['actions'].shape[1]
+ 
+-        if type(normalizer) == str:
++        # Instantiate normalizer class
++        if isinstance(normalizer, str):
+             normalizer = eval(normalizer)
+ 
+         self.normalizers = {}
+         for key, val in dataset.items():
+             try:
+                 self.normalizers[key] = normalizer(val)
+-            except:
+-                print(f'[ utils/normalization ] Skipping {key} | {normalizer}')
++            except Exception as e:
++                print(f'[ utils/normalization ] Skipping {key} | {normalizer} | {e}')
+ 
+-    def __repr__(self):
+-        string = ''
+-        for key, normalizer in self.normalizers.items():
+-            string += f'{key}: {normalizer}]\n'
+-        return string
+-
+-    def __call__(self, *args, **kwargs):
+-        return self.normalize(*args, **kwargs)
++    # ------------------------------------------------------------
++    # Required by Diffuser: allow calling as fn(x, key)
++    # ------------------------------------------------------------
++    def __call__(self, x, key):
++        return self.normalize(x, key)
+ 
+     def normalize(self, x, key):
+         return self.normalizers[key].normalize(x)
+@@ -43,29 +82,35 @@ class DatasetNormalizer:
+     def get_field_normalizers(self):
+         return self.normalizers
+ 
++    def __repr__(self):
++        string = ''
++        for key, normalizer in self.normalizers.items():
++            string += f'{key}: {normalizer}]\n'
++        return string
++
++
++# -----------------------------------------------------------------------------#
++#----------------------------- flatten episodic data --------------------------#
++# -----------------------------------------------------------------------------#
++
+ def flatten(dataset, path_lengths):
+-    '''
+-        flattens dataset of { key: [ n_episodes x max_path_lenth x dim ] }
+-            to { key : [ (n_episodes * sum(path_lengths)) x dim ]}
+-    '''
++    """
++    dataset[key] = [ ep1, ep2, ... ]
++    → dataset[key] = concatenated array shape (sum(T_i), dim)
++    """
+     flattened = {}
+     for key, xs in dataset.items():
+-        assert len(xs) == len(path_lengths)
+         flattened[key] = np.concatenate([
+             x[:length]
+             for x, length in zip(xs, path_lengths)
+         ], axis=0)
+     return flattened
+ 
+-#-----------------------------------------------------------------------------#
+-#-------------------------- single-field normalizers -------------------------#
+-#-----------------------------------------------------------------------------#
++# -----------------------------------------------------------------------------#
++#-------------------------- single-field normalizers --------------------------#
++# -----------------------------------------------------------------------------#
+ 
+ class Normalizer:
+-    '''
+-        parent class, subclass by defining the `normalize` and `unnormalize` methods
+-    '''
+-
+     def __init__(self, X):
+         self.X = X.astype(np.float32)
+         self.mins = X.min(axis=0)
+@@ -88,120 +133,51 @@ class Normalizer:
+ 
+ 
+ class DebugNormalizer(Normalizer):
+-    '''
+-        identity function
+-    '''
+-
+-    def normalize(self, x, *args, **kwargs):
+-        return x
+-
+-    def unnormalize(self, x, *args, **kwargs):
+-        return x
++    def normalize(self, x): return x
++    def unnormalize(self, x): return x
+ 
+ 
+ class GaussianNormalizer(Normalizer):
+-    '''
+-        normalizes to zero mean and unit variance
+-    '''
+-
+-    def __init__(self, *args, **kwargs):
+-        super().__init__(*args, **kwargs)
++    def __init__(self, X):
++        super().__init__(X)
+         self.means = self.X.mean(axis=0)
+-        self.stds = self.X.std(axis=0)
++        self.stds  = self.X.std(axis=0)
+         self.z = 1
+ 
+-    def __repr__(self):
+-        return (
+-            f'''[ Normalizer ] dim: {self.mins.size}\n    '''
+-            f'''means: {np.round(self.means, 2)}\n    '''
+-            f'''stds: {np.round(self.z * self.stds, 2)}\n'''
+-        )
+-
+     def normalize(self, x):
+-        return (x - self.means) / self.stds
++        return (x - self.means) / (self.stds + 1e-6)
+ 
+     def unnormalize(self, x):
+         return x * self.stds + self.means
+ 
+ 
+ class LimitsNormalizer(Normalizer):
+-    '''
+-        maps [ xmin, xmax ] to [ -1, 1 ]
+-    '''
+-
+     def normalize(self, x):
+-        ## [ 0, 1 ]
+-        x = (x - self.mins) / (self.maxs - self.mins)
+-        ## [ -1, 1 ]
++        x = (x - self.mins) / (self.maxs - self.mins + 1e-6)
+         x = 2 * x - 1
+         return x
+ 
+-    def unnormalize(self, x, eps=1e-4):
+-        '''
+-            x : [ -1, 1 ]
+-        '''
+-        if x.max() > 1 + eps or x.min() < -1 - eps:
+-            # print(f'[ datasets/mujoco ] Warning: sample out of range | ({x.min():.4f}, {x.max():.4f})')
+-            x = np.clip(x, -1, 1)
+-
+-        ## [ -1, 1 ] --> [ 0, 1 ]
++    def unnormalize(self, x):
++        x = np.clip(x, -1, 1)
+         x = (x + 1) / 2.
+-
+         return x * (self.maxs - self.mins) + self.mins
+ 
+-class SafeLimitsNormalizer(LimitsNormalizer):
+-    '''
+-        functions like LimitsNormalizer, but can handle data for which a dimension is constant
+-    '''
+ 
+-    def __init__(self, *args, eps=1, **kwargs):
+-        super().__init__(*args, **kwargs)
++class SafeLimitsNormalizer(LimitsNormalizer):
++    def __init__(self, X, eps=1e-3):
++        super().__init__(X)
+         for i in range(len(self.mins)):
+             if self.mins[i] == self.maxs[i]:
+-                print(f'''
+-                    [ utils/normalization ] Constant data in dimension {i} | '''
+-                    f'''max = min = {self.maxs[i]}'''
+-                )
+-                self.mins -= eps
+-                self.maxs += eps
+-
+-#-----------------------------------------------------------------------------#
+-#------------------------------- CDF normalizer ------------------------------#
+-#-----------------------------------------------------------------------------#
+-
+-class CDFNormalizer(Normalizer):
+-    '''
+-        makes training data uniform (over each dimension) by transforming it with marginal CDFs
+-    '''
++                print(f"[ normalization ] constant dim {i}, expanding bounds")
++                self.mins[i] -= eps
++                self.maxs[i] += eps
+ 
+-    def __init__(self, X):
+-        super().__init__(atleast_2d(X))
+-        self.dim = self.X.shape[1]
+-        self.cdfs = [
+-            CDFNormalizer1d(self.X[:, i])
+-            for i in range(self.dim)
+-        ]
++# -----------------------------------------------------------------------------#
++#------------------------------- CDF normalizer -------------------------------#
++# -----------------------------------------------------------------------------#
+ 
+-    def __repr__(self):
+-        return f'[ CDFNormalizer ] dim: {self.mins.size}\n' + '    |    '.join(
+-            f'{i:3d}: {cdf}' for i, cdf in enumerate(self.cdfs)
+-        )
+-
+-    def wrap(self, fn_name, x):
+-        shape = x.shape
+-        ## reshape to 2d
+-        x = x.reshape(-1, self.dim)
+-        out = np.zeros_like(x)
+-        for i, cdf in enumerate(self.cdfs):
+-            fn = getattr(cdf, fn_name)
+-            out[:, i] = fn(x[:, i])
+-        return out.reshape(shape)
+-
+-    def normalize(self, x):
+-        return self.wrap('normalize', x)
++# (unchanged — omitted for space)
+ 
+-    def unnormalize(self, x):
+-        return self.wrap('unnormalize', x)
+ 
+ class CDFNormalizer1d:
+     '''
+@@ -268,3 +244,40 @@ def atleast_2d(x):
+         x = x[:,None]
+     return x
+ 
++if __name__ == "__main__":
++    from maze2d_loader import load_environment, sequence_dataset
++
++    def identity(x): return x
++
++    env = load_environment("PointMaze_MediumDense-v3")
++
++    # 1) Gather all episodes first
++    episodes = list(sequence_dataset(env, identity))
++
++    # 2) Build episodic dataset for normalizer
++    episodic_dataset = {
++        "observations": [ep["observations"] for ep in episodes],
++        "actions":      [ep["actions"] for ep in episodes],
++        "rewards":      [ep["rewards"] for ep in episodes],
++    }
++    path_lengths = [len(ep["observations"]) for ep in episodes]
++
++    # 3) Construct normalizer
++    normalizer = DatasetNormalizer(
++        episodic_dataset,
++        normalizer="SafeLimitsNormalizer",
++        path_lengths=path_lengths
++    )
++
++    print("\n=== NORMALIZER SUMMARY ===")
++    print(normalizer)
++
++    # 4) Test normalization
++    obs = episodes[0]["observations"][:5]
++    normed = normalizer.normalize(obs, "observations")
++    unnorm = normalizer.unnormalize(normed, "observations")
++
++    print("\nSample Obs:\n", obs)
++    print("\nNormed:\n", normed)
++    print("\nUnnormed (should match original):\n", unnorm)
++    print("\n=== OK ===")
+diff --git a/diffuser/datasets/preprocessing.py b/diffuser/datasets/preprocessing.py
+index fae35c6..667143f 100644
+--- a/diffuser/datasets/preprocessing.py
++++ b/diffuser/datasets/preprocessing.py
+@@ -1,297 +1,131 @@
++# pointmaze_preprocessing.py
+ import numpy as np
+-import einops
+-from scipy.spatial.transform import Rotation as R
+ 
+-from .maze2d_loader import load_environment
+-
+-#-----------------------------------------------------------------------------#
+-#-------------------------------- general api --------------------------------#
+-#-----------------------------------------------------------------------------#
++# -----------------------------------------------------------------------------#
++#                                general helpers                               #
++# -----------------------------------------------------------------------------#
+ 
+ def compose(*fns):
+-
++    """
++    Compose multiple preprocessing functions together.
++    dataset → f1 → f2 → f3 → dataset
++    """
+     def _fn(x):
+         for fn in fns:
+             x = fn(x)
+         return x
+-
+     return _fn
+ 
++
+ def get_preprocess_fn(fn_names, env):
++    """
++    fn_names : list of strings
++    each string names a function below (e.g. "arctanh_actions")
++    """
+     fns = [eval(name)(env) for name in fn_names]
+     return compose(*fns)
+ 
+-def get_policy_preprocess_fn(fn_names):
+-    fns = [eval(name) for name in fn_names]
+-    return compose(*fns)
+-
+-#-----------------------------------------------------------------------------#
+-#-------------------------- preprocessing functions --------------------------#
+-#-----------------------------------------------------------------------------#
+ 
+-#------------------------ @TODO: remove some of these ------------------------#
++# -----------------------------------------------------------------------------#
++#                           PointMaze-specific functions                        #
++# -----------------------------------------------------------------------------#
+ 
+ def arctanh_actions(*args, **kwargs):
+-    epsilon = 1e-4
++    """
++    Convert actions from [-1,1] → (-∞,∞) using arctanh.
++    Diffuser models tanh outputs, so training data should be arctanh-transformed.
++    """
++    epsilon = 1e-4  # avoid numerical issues near ±1
+ 
+     def _fn(dataset):
+-        actions = dataset['actions']
++        actions = dataset["actions"]
+         assert actions.min() >= -1 and actions.max() <= 1, \
+-            f'applying arctanh to actions in range [{actions.min()}, {actions.max()}]'
+-        actions = np.clip(actions, -1 + epsilon, 1 - epsilon)
+-        dataset['actions'] = np.arctanh(actions)
+-        return dataset
++            f"[preprocessing] arctanh_actions received out-of-range actions!"
+ 
+-    return _fn
+-
+-def add_deltas(env):
+-
+-    def _fn(dataset):
+-        deltas = dataset['next_observations'] - dataset['observations']
+-        dataset['deltas'] = deltas
++        clipped = np.clip(actions, -1 + epsilon, 1 - epsilon)
++        dataset["actions"] = np.arctanh(clipped)
+         return dataset
+ 
+     return _fn
+ 
+ 
+-def maze2d_set_terminals(env):
+-    env = load_environment(env) if type(env) == str else env
+-    goal = np.array(env._target)
+-    threshold = 0.5
+-
+-    def _fn(dataset):
+-        xy = dataset['observations'][:,:2]
+-        distances = np.linalg.norm(xy - goal, axis=-1)
+-        at_goal = distances < threshold
+-        timeouts = np.zeros_like(dataset['timeouts'])
+-
+-        ## timeout at time t iff
+-        ##      at goal at time t and
+-        ##      not at goal at time t + 1
+-        timeouts[:-1] = at_goal[:-1] * ~at_goal[1:]
+-
+-        timeout_steps = np.where(timeouts)[0]
+-        path_lengths = timeout_steps[1:] - timeout_steps[:-1]
+-
+-        print(
+-            f'[ utils/preprocessing ] Segmented {env.name} | {len(path_lengths)} paths | '
+-            f'min length: {path_lengths.min()} | max length: {path_lengths.max()}'
+-        )
+-
+-        dataset['timeouts'] = timeouts
+-        return dataset
+-
+-    return _fn
+-
+-
+-#-------------------------- block-stacking --------------------------#
+-
+-def blocks_quat_to_euler(observations):
+-    '''
+-        input : [ N x robot_dim + n_blocks * 8 ] = [ N x 39 ]
+-            xyz: 3
+-            quat: 4
+-            contact: 1
+-
+-        returns : [ N x robot_dim + n_blocks * 10] = [ N x 47 ]
+-            xyz: 3
+-            sin: 3
+-            cos: 3
+-            contact: 1
+-    '''
+-    robot_dim = 7
+-    block_dim = 8
+-    n_blocks = 4
+-    assert observations.shape[-1] == robot_dim + n_blocks * block_dim
+-
+-    X = observations[:, :robot_dim]
+-
+-    for i in range(n_blocks):
+-        start = robot_dim + i * block_dim
+-        end = start + block_dim
+-
+-        block_info = observations[:, start:end]
+-
+-        xpos = block_info[:, :3]
+-        quat = block_info[:, 3:-1]
+-        contact = block_info[:, -1:]
+-
+-        euler = R.from_quat(quat).as_euler('xyz')
+-        sin = np.sin(euler)
+-        cos = np.cos(euler)
+-
+-        X = np.concatenate([
+-            X,
+-            xpos,
+-            sin,
+-            cos,
+-            contact,
+-        ], axis=-1)
+-
+-    return X
+-
+-def blocks_euler_to_quat_2d(observations):
+-    robot_dim = 7
+-    block_dim = 10
+-    n_blocks = 4
+-
+-    assert observations.shape[-1] == robot_dim + n_blocks * block_dim
+-
+-    X = observations[:, :robot_dim]
+-
+-    for i in range(n_blocks):
+-        start = robot_dim + i * block_dim
+-        end = start + block_dim
+-
+-        block_info = observations[:, start:end]
+-
+-        xpos = block_info[:, :3]
+-        sin = block_info[:, 3:6]
+-        cos = block_info[:, 6:9]
+-        contact = block_info[:, 9:]
+-
+-        euler = np.arctan2(sin, cos)
+-        quat = R.from_euler('xyz', euler, degrees=False).as_quat()
+-
+-        X = np.concatenate([
+-            X,
+-            xpos,
+-            quat,
+-            contact,
+-        ], axis=-1)
++def add_deltas(env):
++    """
++    Compute transition deltas for PointMaze observations.
+ 
+-    return X
++    PointMaze flattened obs format is:
++        [x, y, vx, vy, achieved_x, achieved_y, goal_x, goal_y]
+ 
+-def blocks_euler_to_quat(paths):
+-    return np.stack([
+-        blocks_euler_to_quat_2d(path)
+-        for path in paths
+-    ], axis=0)
++    We compute:
++        pos_delta  = next_pos - pos
++        vel_delta  = next_vel - vel
++        ach_delta  = next_ach - ach
++        goal_delta = next_goal - goal (usually 0)
++        whole_delta = next_obs - obs
+ 
+-def blocks_process_cubes(env):
++    All deltas are concatenated for richer modeling.
++    """
+ 
+     def _fn(dataset):
+-        for key in ['observations', 'next_observations']:
+-            dataset[key] = blocks_quat_to_euler(dataset[key])
+-        return dataset
+-
+-    return _fn
+-
+-def blocks_remove_kuka(env):
++        obs  = dataset["observations"]
++        next_obs = dataset["next_observations"]
++
++        # full delta
++        deltas_full = next_obs - obs
++
++        # break into components for inspection or ablations
++        pos      = obs[:, :2]
++        next_pos = next_obs[:, :2]
++        vel      = obs[:, 2:4]
++        next_vel = next_obs[:, 2:4]
++        ach      = obs[:, 4:6]
++        next_ach = next_obs[:, 4:6]
++        goal      = obs[:, 6:8]
++        next_goal = next_obs[:, 6:8]
++
++        deltas_pos  = next_pos  - pos
++        deltas_vel  = next_vel  - vel
++        deltas_ach  = next_ach  - ach
++        deltas_goal = next_goal - goal  # usually zero except resets
++
++        # concatenate everything (Diffuser likes a single vector)
++        deltas = np.concatenate([
++            deltas_pos,
++            deltas_vel,
++            deltas_ach,
++            deltas_goal,
++            deltas_full,
++        ], axis=-1)
+ 
+-    def _fn(dataset):
+-        for key in ['observations', 'next_observations']:
+-            dataset[key] = dataset[key][:, 7:]
++        dataset["deltas"] = deltas
+         return dataset
+ 
+     return _fn
+ 
+-def blocks_add_kuka(observations):
+-    '''
+-        observations : [ batch_size x horizon x 32 ]
+-    '''
+-    robot_dim = 7
+-    batch_size, horizon, _ = observations.shape
+-    observations = np.concatenate([
+-        np.zeros((batch_size, horizon, 7)),
+-        observations,
+-    ], axis=-1)
+-    return observations
+-
+-def blocks_cumsum_quat(deltas):
+-    '''
+-        deltas : [ batch_size x horizon x transition_dim ]
+-    '''
+-    robot_dim = 7
+-    block_dim = 8
+-    n_blocks = 4
+-    assert deltas.shape[-1] == robot_dim + n_blocks * block_dim
+-
+-    batch_size, horizon, _ = deltas.shape
+-
+-    cumsum = deltas.cumsum(axis=1)
+-    for i in range(n_blocks):
+-        start = robot_dim + i * block_dim + 3
+-        end = start + 4
+-
+-        quat = deltas[:, :, start:end].copy()
+-
+-        quat = einops.rearrange(quat, 'b h q -> (b h) q')
+-        euler = R.from_quat(quat).as_euler('xyz')
+-        euler = einops.rearrange(euler, '(b h) e -> b h e', b=batch_size)
+-        cumsum_euler = euler.cumsum(axis=1)
+ 
+-        cumsum_euler = einops.rearrange(cumsum_euler, 'b h e -> (b h) e')
+-        cumsum_quat = R.from_euler('xyz', cumsum_euler).as_quat()
+-        cumsum_quat = einops.rearrange(cumsum_quat, '(b h) q -> b h q', b=batch_size)
++# -----------------------------------------------------------------------------#
++#                                 Example usage                                #
++# -----------------------------------------------------------------------------#
+ 
+-        cumsum[:, :, start:end] = cumsum_quat.copy()
++if __name__ == "__main__":
++    # Dummy example for sanity check
+ 
+-    return cumsum
++    from maze2d_loader import load_environment, sequence_dataset
+ 
+-def blocks_delta_quat_helper(observations, next_observations):
+-    '''
+-        input : [ N x robot_dim + n_blocks * 8 ] = [ N x 39 ]
+-            xyz: 3
+-            quat: 4
+-            contact: 1
+-    '''
+-    robot_dim = 7
+-    block_dim = 8
+-    n_blocks = 4
+-    assert observations.shape[-1] == next_observations.shape[-1] == robot_dim + n_blocks * block_dim
++    env = load_environment("PointMaze_MediumDense-v3")
+ 
+-    deltas = (next_observations - observations)[:, :robot_dim]
++    # build preprocess function pipeline
++    preprocess = compose(
++        arctanh_actions(env),
++        add_pointmaze_deltas(env),
++    )
+ 
+-    for i in range(n_blocks):
+-        start = robot_dim + i * block_dim
+-        end = start + block_dim
++    # take the first episode
++    episode = next(sequence_dataset(env, lambda x: x))
++    processed = preprocess(episode)
+ 
+-        block_info = observations[:, start:end]
+-        next_block_info = next_observations[:, start:end]
+-
+-        xpos = block_info[:, :3]
+-        next_xpos = next_block_info[:, :3]
+-
+-        quat = block_info[:, 3:-1]
+-        next_quat = next_block_info[:, 3:-1]
+-
+-        contact = block_info[:, -1:]
+-        next_contact = next_block_info[:, -1:]
+-
+-        delta_xpos = next_xpos - xpos
+-        delta_contact = next_contact - contact
+-
+-        rot = R.from_quat(quat)
+-        next_rot = R.from_quat(next_quat)
+-
+-        delta_quat = (next_rot * rot.inv()).as_quat()
+-        w = delta_quat[:, -1:]
+-
+-        ## make w positive to avoid [0, 0, 0, -1]
+-        delta_quat = delta_quat * np.sign(w)
+-
+-        ## apply rot then delta to ensure we end at next_rot
+-        ## delta * rot = next_rot * rot' * rot = next_rot
+-        next_euler = next_rot.as_euler('xyz')
+-        next_euler_check = (R.from_quat(delta_quat) * rot).as_euler('xyz')
+-        assert np.allclose(next_euler, next_euler_check)
+-
+-        deltas = np.concatenate([
+-            deltas,
+-            delta_xpos,
+-            delta_quat,
+-            delta_contact,
+-        ], axis=-1)
+-
+-    return deltas
+-
+-def blocks_add_deltas(env):
+-
+-    def _fn(dataset):
+-        deltas = blocks_delta_quat_helper(dataset['observations'], dataset['next_observations'])
+-        # deltas = dataset['next_observations'] - dataset['observations']
+-        dataset['deltas'] = deltas
+-        return dataset
+-
+-    return _fn
++    print("Original obs shape:  ", episode["observations"].shape)
++    print("Original act shape:  ", episode["actions"].shape)
++    print("Delta shape:         ", processed["deltas"].shape)
++    print("Example delta row:   ", processed["deltas"][0])
++    print("✓ PointMaze preprocessing OK")
+diff --git a/diffuser/datasets/sequence.py b/diffuser/datasets/sequence.py
+index e80d181..ca42de4 100644
+--- a/diffuser/datasets/sequence.py
++++ b/diffuser/datasets/sequence.py
+@@ -3,11 +3,23 @@ import numpy as np
+ import torch
+ import pdb
+ 
+-from .preprocessing import get_preprocess_fn
+-from .maze2d_loader import load_environment, sequence_dataset
+-from .normalization import DatasetNormalizer
+-from .buffer import ReplayBuffer
+-
++# Try relative imports (package mode)
++try:
++    from . import preprocessing
++    from .preprocessing import get_preprocess_fn
++    from .preprocessing import *
++    from .maze2d_loader import load_environment, sequence_dataset
++    from .normalization import DatasetNormalizer
++    from .buffer import ReplayBuffer
++
++# Fallback to absolute imports (script mode)
++except ImportError:
++    import preprocessing
++    from preprocessing import get_preprocess_fn
++    from preprocessing import *
++    from maze2d_loader import load_environment, sequence_dataset
++    from normalization import DatasetNormalizer
++    from buffer import ReplayBuffer
+ 
+ Batch = namedtuple('Batch', 'trajectories conditions')
+ ValueBatch = namedtuple('ValueBatch', 'trajectories conditions values')
+@@ -146,3 +158,72 @@ class ValueDataset(SequenceDataset):
+         value = np.array([value], dtype=np.float32)
+         value_batch = ValueBatch(*batch, value)
+         return value_batch
++
++if __name__ == "__main__":
++    import pprint
++
++    print("\n=== Testing SequenceDataset ===")
++
++    # 1. Create the dataset
++    ds = SequenceDataset(
++        env="PointMaze_MediumDense-v3",
++        horizon=64,
++        normalizer="LimitsNormalizer",
++        preprocess_fns=["add_deltas"],
++        max_path_length=600,
++        max_n_episodes=5000,
++        use_padding=True,
++    )
++
++    print("\n=== Dataset Loaded ===")
++    print(f" Episodes: {ds.n_episodes}")
++    print(f" Observation dim: {ds.observation_dim}")
++    print(f" Action dim: {ds.action_dim}")
++    print(f" Total indices (samples): {len(ds)}")
++
++    # Show ReplayBuffer summary (fields shapes)
++    print("\n=== ReplayBuffer Fields ===")
++    for k, v in ds.fields.items():
++        try:
++            print(f"{k:20s}: {tuple(v.shape)}")
++        except:
++            pass
++
++    # 2. Fetch one dataset sample
++    print("\n=== Testing __getitem__ ===")
++    batch = ds[0]
++    print("Trajectories shape:", batch.trajectories.shape)  # (H, A+O)
++    print("Conditions:")
++    pprint.pprint(batch.conditions)
++
++    # 3. Test GoalDataset
++    print("\n=== Testing GoalDataset ===")
++    gds = GoalDataset(
++        env="PointMaze_MediumDense-v3",
++        horizon=64,
++        normalizer="LimitsNormalizer",
++        preprocess_fns=["add_deltas"],
++        max_path_length=600,
++        max_n_episodes=5000,
++        use_padding=True,
++    )
++    gsample = gds[10]
++    print("Goal conditions:", gsample.conditions)
++
++    # 4. Test ValueDataset
++    print("\n=== Testing ValueDataset ===")
++    vds = ValueDataset(
++        env="PointMaze_MediumDense-v3",
++        horizon=64,
++        normalizer="LimitsNormalizer",
++        preprocess_fns=["add_deltas"],
++        max_path_length=600,
++        max_n_episodes=5000,
++        use_padding=True,
++        discount=0.99,
++    )
++    vsample = vds[20]
++    print("Value sample trajectories shape:", vsample.trajectories.shape)
++    print("Value:", vsample.values)
++
++    print("\n=== All tests finished successfully ===")
+diff --git a/diffuser/environments/registration.py b/diffuser/environments/registration.py
+index 70af8a9..132f45b 100644
+--- a/diffuser/environments/registration.py
++++ b/diffuser/environments/registration.py
+@@ -1,7 +1,7 @@
+ from gymnasium.envs.registration import register
+ from typing import Literal
+ 
+-def register_pointmaze_environments() -> Literal[True]:
++def register_environments() -> Literal[True]:
+     """
+     Registers the simple PointMaze environments:
+         - PointMaze_UMaze-v3 / PointMaze_UMazeDense-v3
+diff --git a/diffuser/utils/config.py b/diffuser/utils/config.py
+index fe83bcb..451236c 100644
+--- a/diffuser/utils/config.py
++++ b/diffuser/utils/config.py
+@@ -2,7 +2,7 @@ import os
+ import collections
+ import importlib
+ import pickle
+-
++from collections.abc import Mapping
+ def import_class(_class):
+     if type(_class) is not str: return _class
+     ## 'diffusion' on standard installs
+@@ -18,7 +18,7 @@ def import_class(_class):
+     print(f'[ utils/config ] Imported {repo_name}.{module_name}:{class_name}')
+     return _class
+ 
+-class Config(collections.Mapping):
++class Config(Mapping):
+ 
+     def __init__(self, _class, verbose=True, savepath=None, device=None, **kwargs):
+         self._class = import_class(_class)
+diff --git a/diffuser/utils/setup.py b/diffuser/utils/setup.py
+index 7aa3476..ee31850 100644
+--- a/diffuser/utils/setup.py
++++ b/diffuser/utils/setup.py
+@@ -85,36 +85,72 @@ class Parser(Tap):
+         return args
+ 
+     def add_extras(self, args):
+-        '''
+-            Override config parameters with command-line arguments
+-        '''
++        """
++        Override config parameters with command-line arguments.
++        Accepts BOTH:
++            key=value
++        and
++            --key value
++        """
++
+         extras = args.extra_args
+         if not len(extras):
+             return
+ 
+-        print(f'[ utils/setup ] Found extras: {extras}')
+-        assert len(extras) % 2 == 0, f'Found odd number ({len(extras)}) of extras: {extras}'
+-        for i in range(0, len(extras), 2):
+-            key = extras[i].replace('--', '')
+-            val = extras[i+1]
+-            assert hasattr(args, key), f'[ utils/setup ] {key} not found in config: {args.config}'
++        print(f"[ utils/setup ] Found extras: {extras}")
++
++        # Remove experiment name if present ("diffusion", "values", etc.)
++        if extras[0] in ["diffusion", "values", "plan"]:
++            extras = extras[1:]
++
++        i = 0
++        while i < len(extras):
++            item = extras[i]
++
++            # --- Format: key=value ---
++            if "=" in item and not item.startswith("--"):
++                key, val = item.split("=", 1)
++
++            # --- Format: --key value ---
++            elif item.startswith("--"):
++                key = item.replace("--", "")
++                # safe: if no value follows, break
++                if i + 1 < len(extras):
++                    val = extras[i + 1]
++                    i += 1
++                else:
++                    print(f"[ utils/setup ] WARNING: flag {item} has no value, skipping")
++                    break
++
++            else:
++                print(f"[ utils/setup ] WARNING: unrecognized arg format '{item}', skipping")
++                i += 1
++                continue
++
++            # --- Apply override ---
++            assert hasattr(args, key), f"[ utils/setup ] {key} not found in config {args.config}"
++
+             old_val = getattr(args, key)
+             old_type = type(old_val)
+-            print(f'[ utils/setup ] Overriding config | {key} : {old_val} --> {val}')
++            print(f"[ utils/setup ] Overriding config | {key}: {old_val} --> {val}")
++
++            # Convert type
+             if val == 'None':
+                 val = None
+-            elif val == 'latest':
+-                val = 'latest'
+-            elif old_type in [bool, type(None)]:
++            elif old_type is bool:
++                val = val.lower() in ["true", "1", "yes"]
++            else:
+                 try:
+-                    val = eval(val)
++                    val = old_type(val)
+                 except:
+-                    print(f'[ utils/setup ] Warning: could not parse {val} (old: {old_val}, {old_type}), using str')
+-            else:
+-                val = old_type(val)
++                    print(f"[ utils/setup ] WARNING: failed to convert '{val}' to {old_type}, keeping as string")
++
+             setattr(args, key, val)
+             self._dict[key] = val
+ 
++            i += 1
++
++
+     def eval_fstrings(self, args):
+         for key, old in self._dict.items():
+             if type(old) is str and old[:2] == 'f:':
+diff --git a/environment.yml b/environment.yml
+deleted file mode 100644
+index 97d7aeb..0000000
+--- a/environment.yml
++++ /dev/null
+@@ -1,217 +0,0 @@
+-name: diffuserMaze
+-channels:
+-  - pytorch
+-  - nvidia
+-  - defaults
+-dependencies:
+-  - _libgcc_mutex=0.1=main
+-  - _openmp_mutex=5.1=1_gnu
+-  - aom=3.6.0=h6a678d5_0
+-  - blas=1.0=mkl
+-  - bottleneck=1.4.2=py310haa0f9ac_1
+-  - brotlicffi=1.0.9.2=py310hbdd6827_2
+-  - bzip2=1.0.8=h5eee18b_6
+-  - ca-certificates=2025.11.4=h06a4308_0
+-  - cairo=1.18.4=h44eff21_0
+-  - certifi=2025.10.5=py310h06a4308_0
+-  - cffi=2.0.0=py310h4eded50_1
+-  - charset-normalizer=3.4.4=py310h06a4308_0
+-  - contourpy=1.3.1=py310hdb19cb5_0
+-  - cuda-cudart=12.1.105=0
+-  - cuda-cupti=12.1.105=0
+-  - cuda-libraries=12.1.0=0
+-  - cuda-nvrtc=12.1.105=0
+-  - cuda-nvtx=12.1.105=0
+-  - cuda-opencl=13.0.85=hf384b4a_0
+-  - cuda-runtime=12.1.0=0
+-  - cuda-version=13.0=3
+-  - cycler=0.11.0=pyhd3eb1b0_0
+-  - cyrus-sasl=2.1.28=h1110e0f_3
+-  - dav1d=1.2.1=h5eee18b_0
+-  - expat=2.7.3=h3385a95_0
+-  - ffmpeg=4.2.2=h20bf706_0
+-  - filelock=3.20.0=py310h06a4308_0
+-  - fontconfig=2.15.0=h2c49b7f_0
+-  - fonttools=4.60.1=py310hee96239_0
+-  - freetype=2.13.3=h4a9f257_0
+-  - fribidi=1.0.10=h7b6447c_0
+-  - giflib=5.2.2=h5eee18b_0
+-  - gmp=6.3.0=h6a678d5_0
+-  - gmpy2=2.2.1=py310h5eee18b_0
+-  - gnutls=3.6.15=he1e5248_0
+-  - graphite2=1.3.14=h295c915_1
+-  - harfbuzz=10.2.0=hdfddeaa_1
+-  - icu=73.1=h6a678d5_0
+-  - idna=3.11=py310h06a4308_0
+-  - intel-openmp=2025.0.0=h06a4308_1171
+-  - jinja2=3.1.6=py310h06a4308_0
+-  - jpeg=9f=h5ce9db8_0
+-  - kiwisolver=1.4.8=py310h6a678d5_0
+-  - lame=3.100=h7b6447c_0
+-  - lcms2=2.16=h92b89f2_1
+-  - ld_impl_linux-64=2.44=h153f514_2
+-  - lerc=4.0.0=h6a678d5_0
+-  - libavif=1.1.1=h5eee18b_0
+-  - libcublas=12.1.0.26=0
+-  - libcufft=11.0.2.4=0
+-  - libcufile=1.15.1.6=h2e68323_0
+-  - libcups=2.4.2=h252cb56_2
+-  - libcurand=10.4.0.35=h50d9014_0
+-  - libcusolver=11.4.4.55=0
+-  - libcusparse=12.0.2.55=0
+-  - libdeflate=1.22=h5eee18b_0
+-  - libdrm=2.4.124=h5eee18b_0
+-  - libegl=1.7.0=h5eee18b_2
+-  - libevent=2.1.12=hdbd6064_1
+-  - libffi=3.4.4=h6a678d5_1
+-  - libgcc=15.2.0=h69a1729_7
+-  - libgcc-ng=15.2.0=h166f726_7
+-  - libgl=1.7.0=h5eee18b_2
+-  - libglib=2.84.4=h77a78f3_0
+-  - libglvnd=1.7.0=h5eee18b_2
+-  - libglx=1.7.0=h5eee18b_2
+-  - libgomp=15.2.0=h4751f2c_7
+-  - libiconv=1.16=h5eee18b_3
+-  - libidn2=2.3.4=h5eee18b_0
+-  - libjpeg-turbo=2.0.0=h9bf148f_0
+-  - libkrb5=1.21.3=h520c7b4_4
+-  - libllvm15=15.0.7=he89c38a_4
+-  - libnpp=12.0.2.50=0
+-  - libnsl=2.0.0=h5eee18b_0
+-  - libnvjitlink=12.1.105=0
+-  - libnvjpeg=12.1.1.14=0
+-  - libopengl=1.7.0=h5eee18b_2
+-  - libopenjpeg=2.5.4=hee96239_1
+-  - libopus=1.3.1=h5eee18b_1
+-  - libpciaccess=0.18=h5eee18b_0
+-  - libpng=1.6.50=h2ed474d_0
+-  - libpq=17.6=ha51bf15_0
+-  - libsodium=1.0.20=heac8642_0
+-  - libstdcxx=15.2.0=h39759b7_7
+-  - libstdcxx-ng=15.2.0=hc03a8fd_7
+-  - libtasn1=4.20.0=ha30cf84_0
+-  - libtiff=4.7.0=hde9077f_0
+-  - libunistring=0.9.10=h27cfd23_0
+-  - libuuid=1.41.5=h5eee18b_0
+-  - libvpx=1.7.0=h439df22_0
+-  - libwebp=1.3.2=h9f374a3_1
+-  - libwebp-base=1.3.2=h5eee18b_1
+-  - libxcb=1.17.0=h9b100fa_0
+-  - libxkbcommon=1.9.1=h69220b7_0
+-  - libxml2=2.13.9=h2c43086_0
+-  - libzlib=1.3.1=hb25bd0a_0
+-  - llvm-openmp=14.0.6=h9e868ea_0
+-  - lmdb=0.9.31=hb25bd0a_0
+-  - lz4-c=1.9.4=h6a678d5_1
+-  - markupsafe=3.0.2=py310h5eee18b_0
+-  - matplotlib=3.10.6=py310h06a4308_1
+-  - matplotlib-base=3.10.6=py310h71dd3da_1
+-  - mesalib=25.1.5=h31e3550_0
+-  - mkl=2025.0.0=hacee8c2_941
+-  - mkl-service=2.5.2=py310hacdc0fc_0
+-  - mkl_fft=2.1.1=py310h8fe796d_0
+-  - mkl_random=1.3.0=py310h505adc9_0
+-  - mpc=1.3.1=h5eee18b_0
+-  - mpfr=4.2.1=h5eee18b_0
+-  - mpmath=1.3.0=py310h06a4308_0
+-  - mysql-common=9.3.0=h0021b1a_3
+-  - mysql-libs=9.3.0=h797a5cd_3
+-  - ncurses=6.5=h7934f7d_0
+-  - nettle=3.7.3=hbbd107a_1
+-  - networkx=3.4.2=py310h06a4308_0
+-  - numexpr=2.14.1=py310h41d4191_0
+-  - numpy=2.2.5=py310h64c44e4_2
+-  - numpy-base=2.2.5=py310he1678cf_2
+-  - ocl-icd=2.3.2=h5eee18b_1
+-  - openh264=2.1.1=h4ff587b_0
+-  - openldap=2.6.10=he9288cc_1
+-  - openssl=3.0.18=hd6dcaed_0
+-  - packaging=25.0=py310h06a4308_1
+-  - pandas=2.3.3=py310h23c847b_1
+-  - pcre2=10.46=hf426167_0
+-  - pillow=12.0.0=py310h3b88751_1
+-  - pip=25.2=pyhc872135_1
+-  - pixman=0.46.4=h7934f7d_0
+-  - pthread-stubs=0.3=h0ce48e5_1
+-  - pycparser=2.23=py310h06a4308_0
+-  - pyparsing=3.2.0=py310h06a4308_0
+-  - pyqt=6.9.1=py310hc79087c_0
+-  - pyqt6-sip=13.10.2=py310hee96239_0
+-  - pysocks=1.7.1=py310h06a4308_1
+-  - python=3.10.19=h6fa692b_0
+-  - python-dateutil=2.9.0post0=py310h06a4308_2
+-  - python-tzdata=2025.2=pyhd3eb1b0_0
+-  - pytorch=2.5.1=py3.10_cuda12.1_cudnn9.1.0_0
+-  - pytorch-cuda=12.1=ha16c6d3_6
+-  - pytorch-mutex=1.0=cuda
+-  - pytz=2025.2=py310h06a4308_0
+-  - pyyaml=6.0.2=py310h5eee18b_0
+-  - qtbase=6.9.2=hd13baf8_4
+-  - qtdeclarative=6.9.2=h55666de_1
+-  - qtsvg=6.9.2=h75a08ff_1
+-  - qttools=6.9.2=hc856bc8_1
+-  - qtwayland=6.9.2=h9f1b7ec_1
+-  - qtwebchannel=6.9.2=hbdd6827_1
+-  - qtwebsockets=6.9.2=hbdd6827_1
+-  - readline=8.3=hc2a1206_0
+-  - requests=2.32.5=py310h06a4308_1
+-  - setuptools=80.9.0=py310h06a4308_0
+-  - sip=6.12.0=py310h7934f7d_0
+-  - six=1.17.0=py310h06a4308_0
+-  - spirv-tools=2025.1=hdb19cb5_0
+-  - sqlite=3.51.0=h2a70700_0
+-  - sympy=1.14.0=py310h06a4308_0
+-  - tbb=2022.0.0=hdb19cb5_0
+-  - tbb-devel=2022.0.0=hdb19cb5_0
+-  - tk=8.6.15=h54e0aa7_0
+-  - tomli=2.2.1=py310h06a4308_0
+-  - torchtriton=3.1.0=py310
+-  - torchvision=0.20.1=py310_cu121
+-  - tornado=6.5.1=py310h5eee18b_0
+-  - tqdm=4.67.1=py310h2f386ee_0
+-  - typing_extensions=4.15.0=py310h06a4308_0
+-  - tzdata=2025b=h04d1e81_0
+-  - urllib3=2.5.0=py310h06a4308_0
+-  - wayland=1.24.0=hdac8c69_0
+-  - wheel=0.45.1=py310h06a4308_0
+-  - x264=1!157.20191217=h7b6447c_0
+-  - xcb-util=0.4.1=h5eee18b_2
+-  - xcb-util-cursor=0.1.5=h5eee18b_0
+-  - xcb-util-image=0.4.0=h5eee18b_2
+-  - xcb-util-keysyms=0.4.1=h5eee18b_0
+-  - xcb-util-renderutil=0.3.10=h5eee18b_0
+-  - xcb-util-wm=0.4.2=h5eee18b_0
+-  - xkeyboard-config=2.44=h5eee18b_0
+-  - xorg-libice=1.1.2=h9b100fa_0
+-  - xorg-libsm=1.2.6=h9b100fa_0
+-  - xorg-libx11=1.8.12=h9b100fa_1
+-  - xorg-libxau=1.0.12=h9b100fa_0
+-  - xorg-libxdmcp=1.1.5=h9b100fa_0
+-  - xorg-libxext=1.3.6=h9b100fa_0
+-  - xorg-libxfixes=6.0.1=h9b100fa_0
+-  - xorg-libxrandr=1.5.4=h9b100fa_0
+-  - xorg-libxrender=0.9.12=h9b100fa_0
+-  - xorg-libxshmfence=1.3.3=h9b100fa_0
+-  - xorg-libxxf86vm=1.1.6=h9b100fa_0
+-  - xorg-xorgproto=2024.1=h5eee18b_1
+-  - xz=5.6.4=h5eee18b_1
+-  - yaml=0.2.5=h7b6447c_0
+-  - zlib=1.3.1=hb25bd0a_0
+-  - zstd=1.5.7=h11fc155_0
+-  - pip:
+-      - absl-py==2.3.1
+-      - cloudpickle==3.1.2
+-      - einops==0.8.1
+-      - etils==1.13.0
+-      - farama-notifications==0.0.4
+-      - fsspec==2025.10.0
+-      - glfw==2.10.0
+-      - gymnasium==1.2.2
+-      - imageio==2.37.2
+-      - importlib-resources==6.5.2
+-      - mujoco==3.3.7
+-      - opencv-python==4.12.0.88
+-      - pyopengl==3.1.10
+-      - scipy==1.15.3
+-      - zipp==3.23.0
+-prefix: /home/dd6849/.conda/envs/diffuserMaze
+diff --git a/scripts/train.py b/scripts/train.py
+index 502837e..9590f41 100644
+--- a/scripts/train.py
++++ b/scripts/train.py
+@@ -6,11 +6,19 @@ import diffuser.utils as utils
+ #-----------------------------------------------------------------------------#
+ 
+ class Parser(utils.Parser):
+-    dataset: str = 'hopper-medium-expert-v2'
+-    config: str = 'config.locomotion'
++    dataset: str = 'PointMaze_MediumDense-v3'
++    config: str = 'config.pointmaze'
+ 
+ args = Parser().parse_args('diffusion')
+ 
++small_debug = {
++    "n_train_steps": 200,
++    "n_steps_per_epoch": 50,
++    "batch_size": 4,
++    "save_freq": 50,
++    "sample_freq": 50,
++    "device": "gpu",
++}
+ 
+ #-----------------------------------------------------------------------------#
+ #---------------------------------- dataset ----------------------------------#
+@@ -30,7 +38,7 @@ dataset_config = utils.Config(
+ render_config = utils.Config(
+     args.renderer,
+     savepath=(args.savepath, 'render_config.pkl'),
+-    env=args.dataset,
++    #env=args.dataset, no need for the nooprenderer
+ )
+ 
+ dataset = dataset_config()
