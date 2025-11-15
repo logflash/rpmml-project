@@ -8,8 +8,8 @@ import pdb
 #-----------------------------------------------------------------------------#
 
 class Parser(utils.Parser):
-    dataset: str = 'PointMaze_MediumDense-v3'      # <-- CHANGED from walker2d
-    config: str = 'config.pointmaze'               # <-- CHANGED to your PM config
+    dataset: str = 'PointMaze_MediumDense-v3'      
+    config: str = 'config.pointmaze'              
 
 # Load the "values" block of config.pointmaze
 args = Parser().parse_args('values')
@@ -19,7 +19,7 @@ args = Parser().parse_args('values')
 #-----------------------------------------------------------------------------#
 
 dataset_config = utils.Config(
-    args.loader,                                    # should be ValueDataset
+    args.loader,                                    
     savepath=(args.savepath, 'dataset_config.pkl'),
     env=args.dataset,
     horizon=args.horizon,
