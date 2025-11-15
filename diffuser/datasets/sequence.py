@@ -3,11 +3,23 @@ import numpy as np
 import torch
 import pdb
 
-from .preprocessing import get_preprocess_fn
-from .maze2d_loader import load_environment, sequence_dataset
-from .normalization import DatasetNormalizer
-from .buffer import ReplayBuffer
+# Try relative imports (package mode)
+try:
+    from . import preprocessing
+    from .preprocessing import get_preprocess_fn
+    from .preprocessing import *
+    from .maze2d_loader import load_environment, sequence_dataset
+    from .normalization import DatasetNormalizer
+    from .buffer import ReplayBuffer
 
+# Fallback to absolute imports (script mode)
+except ImportError:
+    import preprocessing
+    from preprocessing import get_preprocess_fn
+    from preprocessing import *
+    from maze2d_loader import load_environment, sequence_dataset
+    from normalization import DatasetNormalizer
+    from buffer import ReplayBuffer
 
 Batch = namedtuple('Batch', 'trajectories conditions')
 ValueBatch = namedtuple('ValueBatch', 'trajectories conditions values')
@@ -146,3 +158,72 @@ class ValueDataset(SequenceDataset):
         value = np.array([value], dtype=np.float32)
         value_batch = ValueBatch(*batch, value)
         return value_batch
+
+if __name__ == "__main__":
+    import pprint
+
+    print("\n=== Testing SequenceDataset ===")
+
+    # 1. Create the dataset
+    ds = SequenceDataset(
+        env="PointMaze_MediumDense-v3",
+        horizon=64,
+        normalizer="LimitsNormalizer",
+        preprocess_fns=["add_deltas"],
+        max_path_length=600,
+        max_n_episodes=5000,
+        use_padding=True,
+    )
+
+    print("\n=== Dataset Loaded ===")
+    print(f" Episodes: {ds.n_episodes}")
+    print(f" Observation dim: {ds.observation_dim}")
+    print(f" Action dim: {ds.action_dim}")
+    print(f" Total indices (samples): {len(ds)}")
+
+    # Show ReplayBuffer summary (fields shapes)
+    print("\n=== ReplayBuffer Fields ===")
+    for k, v in ds.fields.items():
+        try:
+            print(f"{k:20s}: {tuple(v.shape)}")
+        except:
+            pass
+
+    # 2. Fetch one dataset sample
+    print("\n=== Testing __getitem__ ===")
+    batch = ds[0]
+    print("Trajectories shape:", batch.trajectories.shape)  # (H, A+O)
+    print("Conditions:")
+    pprint.pprint(batch.conditions)
+
+    # 3. Test GoalDataset
+    print("\n=== Testing GoalDataset ===")
+    gds = GoalDataset(
+        env="PointMaze_MediumDense-v3",
+        horizon=64,
+        normalizer="LimitsNormalizer",
+        preprocess_fns=["add_deltas"],
+        max_path_length=600,
+        max_n_episodes=5000,
+        use_padding=True,
+    )
+    gsample = gds[10]
+    print("Goal conditions:", gsample.conditions)
+
+    # 4. Test ValueDataset
+    print("\n=== Testing ValueDataset ===")
+    vds = ValueDataset(
+        env="PointMaze_MediumDense-v3",
+        horizon=64,
+        normalizer="LimitsNormalizer",
+        preprocess_fns=["add_deltas"],
+        max_path_length=600,
+        max_n_episodes=5000,
+        use_padding=True,
+        discount=0.99,
+    )
+    vsample = vds[20]
+    print("Value sample trajectories shape:", vsample.trajectories.shape)
+    print("Value:", vsample.values)
+
+    print("\n=== All tests finished successfully ===")

@@ -1,24 +1,25 @@
+# scripts/train_values.py
+
 import diffuser.utils as utils
 import pdb
-
 
 #-----------------------------------------------------------------------------#
 #----------------------------------- setup -----------------------------------#
 #-----------------------------------------------------------------------------#
 
 class Parser(utils.Parser):
-    dataset: str = 'walker2d-medium-replay-v2'
-    config: str = 'config.locomotion'
+    dataset: str = 'PointMaze_MediumDense-v3'      # <-- CHANGED from walker2d
+    config: str = 'config.pointmaze'               # <-- CHANGED to your PM config
 
+# Load the "values" block of config.pointmaze
 args = Parser().parse_args('values')
-
 
 #-----------------------------------------------------------------------------#
 #---------------------------------- dataset ----------------------------------#
 #-----------------------------------------------------------------------------#
 
 dataset_config = utils.Config(
-    args.loader,
+    args.loader,                                    # should be ValueDataset
     savepath=(args.savepath, 'dataset_config.pkl'),
     env=args.dataset,
     horizon=args.horizon,
@@ -26,14 +27,15 @@ dataset_config = utils.Config(
     preprocess_fns=args.preprocess_fns,
     use_padding=args.use_padding,
     max_path_length=args.max_path_length,
-    ## value-specific kwargs
+
+    # value-specific kwargs
     discount=args.discount,
     termination_penalty=args.termination_penalty,
     normed=args.normed,
 )
 
 render_config = utils.Config(
-    args.renderer,
+    args.renderer,                                  # NoopRenderer
     savepath=(args.savepath, 'render_config.pkl'),
     env=args.dataset,
 )
@@ -49,7 +51,7 @@ action_dim = dataset.action_dim
 #-----------------------------------------------------------------------------#
 
 model_config = utils.Config(
-    args.model,
+    args.model,                                      # ValueFunction
     savepath=(args.savepath, 'model_config.pkl'),
     horizon=args.horizon,
     transition_dim=observation_dim + action_dim,
@@ -59,7 +61,7 @@ model_config = utils.Config(
 )
 
 diffusion_config = utils.Config(
-    args.diffusion,
+    args.diffusion,                                  # ValueDiffusion
     savepath=(args.savepath, 'diffusion_config.pkl'),
     horizon=args.horizon,
     observation_dim=observation_dim,
@@ -90,9 +92,7 @@ trainer_config = utils.Config(
 #-----------------------------------------------------------------------------#
 
 model = model_config()
-
 diffusion = diffusion_config(model)
-
 trainer = trainer_config(diffusion, dataset, renderer)
 
 #-----------------------------------------------------------------------------#

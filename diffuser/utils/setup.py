@@ -85,35 +85,71 @@ class Parser(Tap):
         return args
 
     def add_extras(self, args):
-        '''
-            Override config parameters with command-line arguments
-        '''
+        """
+        Override config parameters with command-line arguments.
+        Accepts BOTH:
+            key=value
+        and
+            --key value
+        """
+
         extras = args.extra_args
         if not len(extras):
             return
 
-        print(f'[ utils/setup ] Found extras: {extras}')
-        assert len(extras) % 2 == 0, f'Found odd number ({len(extras)}) of extras: {extras}'
-        for i in range(0, len(extras), 2):
-            key = extras[i].replace('--', '')
-            val = extras[i+1]
-            assert hasattr(args, key), f'[ utils/setup ] {key} not found in config: {args.config}'
+        print(f"[ utils/setup ] Found extras: {extras}")
+
+        # Remove experiment name if present ("diffusion", "values", etc.)
+        if extras[0] in ["diffusion", "values", "plan"]:
+            extras = extras[1:]
+
+        i = 0
+        while i < len(extras):
+            item = extras[i]
+
+            # --- Format: key=value ---
+            if "=" in item and not item.startswith("--"):
+                key, val = item.split("=", 1)
+
+            # --- Format: --key value ---
+            elif item.startswith("--"):
+                key = item.replace("--", "")
+                # safe: if no value follows, break
+                if i + 1 < len(extras):
+                    val = extras[i + 1]
+                    i += 1
+                else:
+                    print(f"[ utils/setup ] WARNING: flag {item} has no value, skipping")
+                    break
+
+            else:
+                print(f"[ utils/setup ] WARNING: unrecognized arg format '{item}', skipping")
+                i += 1
+                continue
+
+            # --- Apply override ---
+            assert hasattr(args, key), f"[ utils/setup ] {key} not found in config {args.config}"
+
             old_val = getattr(args, key)
             old_type = type(old_val)
-            print(f'[ utils/setup ] Overriding config | {key} : {old_val} --> {val}')
+            print(f"[ utils/setup ] Overriding config | {key}: {old_val} --> {val}")
+
+            # Convert type
             if val == 'None':
                 val = None
-            elif val == 'latest':
-                val = 'latest'
-            elif old_type in [bool, type(None)]:
-                try:
-                    val = eval(val)
-                except:
-                    print(f'[ utils/setup ] Warning: could not parse {val} (old: {old_val}, {old_type}), using str')
+            elif old_type is bool:
+                val = val.lower() in ["true", "1", "yes"]
             else:
-                val = old_type(val)
+                try:
+                    val = old_type(val)
+                except:
+                    print(f"[ utils/setup ] WARNING: failed to convert '{val}' to {old_type}, keeping as string")
+
             setattr(args, key, val)
             self._dict[key] = val
+
+            i += 1
+
 
     def eval_fstrings(self, args):
         for key, old in self._dict.items():

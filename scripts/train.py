@@ -6,11 +6,19 @@ import diffuser.utils as utils
 #-----------------------------------------------------------------------------#
 
 class Parser(utils.Parser):
-    dataset: str = 'hopper-medium-expert-v2'
-    config: str = 'config.locomotion'
+    dataset: str = 'PointMaze_MediumDense-v3'
+    config: str = 'config.pointmaze'
 
 args = Parser().parse_args('diffusion')
 
+small_debug = {
+    "n_train_steps": 200,
+    "n_steps_per_epoch": 50,
+    "batch_size": 4,
+    "save_freq": 50,
+    "sample_freq": 50,
+    "device": "gpu",
+}
 
 #-----------------------------------------------------------------------------#
 #---------------------------------- dataset ----------------------------------#
@@ -30,7 +38,7 @@ dataset_config = utils.Config(
 render_config = utils.Config(
     args.renderer,
     savepath=(args.savepath, 'render_config.pkl'),
-    env=args.dataset,
+    #env=args.dataset, no need for the nooprenderer
 )
 
 dataset = dataset_config()
