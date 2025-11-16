@@ -1,4 +1,4 @@
-import diffuser.environments.maze2d_env
+import environments.maze2d_env
 import gymnasium as gym
 
 env = gym.make("Maze2D-v0")
