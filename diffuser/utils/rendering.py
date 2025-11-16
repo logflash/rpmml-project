@@ -1,4 +1,3 @@
-## TODO: TALK TO TOMASZ ABOUT THIS
 import os
 import numpy as np
 import einops
@@ -6,7 +5,6 @@ import imageio
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import gymnasium as gym
-import mujoco as mjc
 import warnings
 import pdb
 
@@ -14,7 +12,49 @@ import pdb
 from .arrays import to_np
 from .video import save_video, save_videos
 
-from diffuser.datasets.maze2d_loader import load_environment
+from datasets.maze2d_loader import load_environment
+
+
+
+def render_pointmaze(env, obs, size=256):
+    maze = np.array(env.maze.maze_map, dtype=float)
+    H, W = maze.shape
+
+    fig, ax = plt.subplots(figsize=(3, 3), dpi=size // 3)
+    ax.imshow(maze, cmap="gray_r", origin="upper")
+
+   
+    obs = np.asarray(obs)
+
+    x, y = obs[0], obs[1]      
+
+    cell_size = env.maze.maze_size_scaling
+
+    row, col = env.maze.cell_xy_to_rowcol([x, y])
+    wx, wy   = env.maze.cell_rowcol_to_xy([row, col])
+
+    agent_x = col + (x - wx) / cell_size
+    agent_y = row - (y - wy) / cell_size
+
+    grow, gcol = env.maze.cell_xy_to_rowcol([gx, gy])
+    gwx, gwy   = env.maze.cell_rowcol_to_xy([grow, gcol])
+
+    goal_x = gcol + (gx - gwx) / cell_size
+    goal_y = grow + (gy - gwy) / cell_size
+
+    ax.scatter(agent_x, agent_y, c="red",   s=160, edgecolor="black", zorder=5)
+    ax.scatter(goal_x,  goal_y,  c="green", s=160, edgecolor="black", zorder=5)
+
+    ax.set_xlim(-0.5, W - 0.5)
+    ax.set_ylim(H - 0.5, -0.5) 
+    ax.set_xticks([]); ax.set_yticks([])
+
+    plt.tight_layout(pad=0)
+    fig.canvas.draw()
+    frame = np.array(fig.canvas.renderer.buffer_rgba())[:, :, :3]
+    plt.close(fig)
+    return frame
+
 
 #-----------------------------------------------------------------------------#
 #------------------------------- helper structs ------------------------------#
@@ -48,224 +88,115 @@ def atmost_2d(x):
 #---------------------------------- renderers --------------------------------#
 #-----------------------------------------------------------------------------#
 
-class MuJoCoRenderer:
-    '''
-        default mujoco renderer
-    '''
+class SimpleMazeRenderer:
+    """
+    A pure-python, matplotlib-based drop-in replacement for MuJoCoRenderer.
+    It keeps the same API but does NOT use mujoco, offscreen viewers, qpos, qvel, etc.
+    Only works with Maze2D/PointMaze envs.
+    """
 
     def __init__(self, env):
-        if type(env) is str:
+        if isinstance(env, str):
             env = env_map(env)
             self.env = gym.make(env)
         else:
             self.env = env
-        ## - 1 because the envs in renderer are fully-observed
-        self.observation_dim = np.prod(self.env.observation_space.shape) - 1
-        self.action_dim = np.prod(self.env.action_space.shape)
-        try:
-            self.viewer = mjc.MjRenderContextOffscreen(self.env.sim)
-        except:
-            print('[ utils/rendering ] Warning: could not initialize offscreen renderer')
-            self.viewer = None
 
-    def pad_observation(self, observation):
-        state = np.concatenate([
-            np.zeros(1),
-            observation,
-        ])
-        return state
+        # Preserve dims for downstream Diffuser code
+        obs_space = self.env.observation_space
+        if isinstance(obs_space, gym.spaces.Dict):
+            self.observation_dim = int(sum(np.prod(s.shape)
+                                           for s in obs_space.spaces.values()))
+        else:
+            self.observation_dim = int(np.prod(obs_space.shape))
 
-    def pad_observations(self, observations):
-        qpos_dim = self.env.sim.data.qpos.size
-        ## xpos is hidden
-        xvel_dim = qpos_dim - 1
-        xvel = observations[:, xvel_dim]
-        xpos = np.cumsum(xvel) * self.env.dt
-        states = np.concatenate([
-            xpos[:,None],
-            observations,
-        ], axis=-1)
-        return states
+        self.action_dim = int(np.prod(self.env.action_space.shape))
 
-    def render(self, observation, dim=256, partial=False, qvel=True, render_kwargs=None, conditions=None):
+        print("[SimpleMazeRenderer] Using headless matplotlib–based renderer.")
 
-        if type(dim) == int:
+    # -------------------------------------------------------------
+    # Core single-frame render
+    # -------------------------------------------------------------
+    def render(self, observation, dim=256, partial=False, qvel=True,
+               render_kwargs=None, conditions=None):
+
+        # Normalize shape
+        if isinstance(dim, int):
             dim = (dim, dim)
 
-        if self.viewer is None:
-            return np.zeros((*dim, 3), np.uint8)
+        # We DO NOT reconstruct MuJoCo state → we just call your renderer
+        frame = render_pointmaze(self.env, observation, size=dim[0])
+        return frame
 
-        if render_kwargs is None:
-            xpos = observation[0] if not partial else 0
-            render_kwargs = {
-                'trackbodyid': 2,
-                'distance': 3,
-                'lookat': [xpos, -0.5, 1],
-                'elevation': -20
-            }
-
-        for key, val in render_kwargs.items():
-            if key == 'lookat':
-                self.viewer.cam.lookat[:] = val[:]
-            else:
-                setattr(self.viewer.cam, key, val)
-
-        if partial:
-            state = self.pad_observation(observation)
-        else:
-            state = observation
-
-        qpos_dim = self.env.sim.data.qpos.size
-        if not qvel or state.shape[-1] == qpos_dim:
-            qvel_dim = self.env.sim.data.qvel.size
-            state = np.concatenate([state, np.zeros(qvel_dim)])
-
-        set_state(self.env, state)
-
-        self.viewer.render(*dim)
-        data = self.viewer.read_pixels(*dim, depth=False)
-        data = data[::-1, :, :]
-        return data
-
+    # -------------------------------------------------------------
+    # Frame list rendering
+    # -------------------------------------------------------------
     def _renders(self, observations, **kwargs):
-        images = []
-        for observation in observations:
-            img = self.render(observation, **kwargs)
-            images.append(img)
-        return np.stack(images, axis=0)
+        imgs = []
+        for obs in observations:
+            imgs.append(self.render(obs, **kwargs))
+        return np.stack(imgs, axis=0)
 
     def renders(self, samples, partial=False, **kwargs):
-        if partial:
-            samples = self.pad_observations(samples)
-            partial = False
+        batch = self._renders(samples, **kwargs)
 
-        sample_images = self._renders(samples, partial=partial, **kwargs)
+        # The old API returned a "composite" (one frame),
+        # but Maze2D doesn't need compositing. Just return last frame.
+        return batch[-1]
 
-        composite = np.ones_like(sample_images[0]) * 255
-
-        for img in sample_images:
-            mask = get_image_mask(img)
-            composite[mask] = img[mask]
-
-        return composite
-
+    # -------------------------------------------------------------
+    # Composite
+    # -------------------------------------------------------------
     def composite(self, savepath, paths, dim=(1024, 256), **kwargs):
-
-        render_kwargs = {
-            'trackbodyid': 2,
-            'distance': 10,
-            'lookat': [5, 2, 0.5],
-            'elevation': 0
-        }
-        images = []
+        outs = []
         for path in paths:
-            ## [ H x obs_dim ]
-            path = atmost_2d(path)
-            img = self.renders(to_np(path), dim=dim, partial=True, qvel=True, render_kwargs=render_kwargs, **kwargs)
-            images.append(img)
-        images = np.concatenate(images, axis=0)
+            imgs = self._renders(path, dim=dim[0])
+            outs.append(imgs[-1])
+
+        out = np.concatenate(outs, axis=0)
 
         if savepath is not None:
-            imageio.imsave(savepath, images)
-            print(f'Saved {len(paths)} samples to: {savepath}')
+            imageio.imsave(savepath, out)
+        return out
 
-        return images
+    # -------------------------------------------------------------
+    # Videos
+    # -------------------------------------------------------------
+    def render_rollout(self, savepath, states, fps=30, **kwargs):
+        if isinstance(states, list):
+            states = np.array(states)
 
-    def render_rollout(self, savepath, states, **video_kwargs):
-        if type(states) is list: states = np.array(states)
-        images = self._renders(states, partial=True)
-        save_video(savepath, images, **video_kwargs)
+        frames = self._renders(states)
+        save_video(savepath, frames, fps=fps)
 
+    # -------------------------------------------------------------
+    # Diffuser plan renderer
+    # -------------------------------------------------------------
     def render_plan(self, savepath, actions, observations_pred, state, fps=30):
-        ## [ batch_size x horizon x observation_dim ]
-        observations_real = rollouts_from_state(self.env, state, actions)
+        # No mujoco rollout — visualize predictions only
+        frames = []
+        for horizon_preds in observations_pred:
+            imgs = self._renders(horizon_preds)
+            frames.append(imgs)
+        save_video(savepath, frames, fps=fps)
 
-        ## there will be one more state in `observations_real`
-        ## than in `observations_pred` because the last action
-        ## does not have an associated next_state in the sampled trajectory
-        observations_real = observations_real[:,:-1]
-
-        images_pred = np.stack([
-            self._renders(obs_pred, partial=True)
-            for obs_pred in observations_pred
-        ])
-
-        images_real = np.stack([
-            self._renders(obs_real, partial=False)
-            for obs_real in observations_real
-        ])
-
-        ## [ batch_size x horizon x H x W x C ]
-        images = np.concatenate([images_pred, images_real], axis=-2)
-        save_videos(savepath, *images)
-
-    def render_diffusion(self, savepath, diffusion_path, **video_kwargs):
-        '''
-            diffusion_path : [ n_diffusion_steps x batch_size x 1 x horizon x joined_dim ]
-        '''
-        render_kwargs = {
-            'trackbodyid': 2,
-            'distance': 10,
-            'lookat': [10, 2, 0.5],
-            'elevation': 0,
-        }
-
-        diffusion_path = to_np(diffusion_path)
-
-        n_diffusion_steps, batch_size, _, horizon, joined_dim = diffusion_path.shape
+    # -------------------------------------------------------------
+    # Diffusion trajectory rendering
+    # -------------------------------------------------------------
+    def render_diffusion(self, savepath, diffusion_path, fps=30):
+        dp = to_np(diffusion_path)
+        T, B, _, H, D = dp.shape
 
         frames = []
-        for t in reversed(range(n_diffusion_steps)):
-            print(f'[ utils/renderer ] Diffusion: {t} / {n_diffusion_steps}')
+        for t in reversed(range(T)):
+            composite = []
+            for traj in dp[t]:
+                imgs = self._renders(traj[:, :self.observation_dim])
+                composite.append(imgs[-1])
+            frames.append(np.concatenate(composite, axis=0))
 
-            ## [ batch_size x horizon x observation_dim ]
-            states_l = diffusion_path[t].reshape(batch_size, horizon, joined_dim)[:, :, :self.observation_dim]
-
-            frame = []
-            for states in states_l:
-                img = self.composite(None, states, dim=(1024, 256), partial=True, qvel=True, render_kwargs=render_kwargs)
-                frame.append(img)
-            frame = np.concatenate(frame, axis=0)
-
-            frames.append(frame)
-
-        save_video(savepath, frames, **video_kwargs)
+        save_video(savepath, frames, fps=fps)
 
     def __call__(self, *args, **kwargs):
         return self.renders(*args, **kwargs)
 
-#-----------------------------------------------------------------------------#
-#---------------------------------- rollouts ---------------------------------#
-#-----------------------------------------------------------------------------#
-
-def set_state(env, state):
-    qpos_dim = env.sim.data.qpos.size
-    qvel_dim = env.sim.data.qvel.size
-    if not state.size == qpos_dim + qvel_dim:
-        warnings.warn(
-            f'[ utils/rendering ] Expected state of size {qpos_dim + qvel_dim}, '
-            f'but got state of size {state.size}')
-        state = state[:qpos_dim + qvel_dim]
-
-    env.set_state(state[:qpos_dim], state[qpos_dim:])
-
-def rollouts_from_state(env, state, actions_l):
-    rollouts = np.stack([
-        rollout_from_state(env, state, actions)
-        for actions in actions_l
-    ])
-    return rollouts
-
-def rollout_from_state(env, state, actions):
-    qpos_dim = env.sim.data.qpos.size
-    env.set_state(state[:qpos_dim], state[qpos_dim:])
-    observations = [env._get_obs()]
-    for act in actions:
-        obs, rew, term, _ = env.step(act)
-        observations.append(obs)
-        if term:
-            break
-    for i in range(len(observations), len(actions)+1):
-        ## if terminated early, pad with zeros
-        observations.append( np.zeros(obs.size) )
-    return np.stack(observations)
