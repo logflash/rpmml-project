@@ -144,6 +144,8 @@ class ResidualBlock(nn.Module):
         self.res_conv = nn.Conv1d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
 
     def forward(self, x, time_emb):
+        """Forward for residual block."""
+
         h = self.block1(x)
 
         # FiLM conditioning
@@ -168,6 +170,8 @@ class TemporalAttention(nn.Module):
         self.to_out = nn.Linear(dim, dim)
 
     def forward(self, x):
+        """Forward for temporal attention."""
+
         b, c, t = x.shape
         x = rearrange(x, "b c t -> b t c")
 
@@ -239,6 +243,8 @@ class TemporalUNet(nn.Module):
         )
 
     def forward(self, x, time):
+        """Forward for the temporal u-net."""
+
         # x: (batch, horizon, input_dim)
         x = rearrange(x, "b t c -> b c t")
 
@@ -400,6 +406,8 @@ class DiffuserTrainer:
         )
 
     def train_step(self, batch):
+        """A single training step for diffusion training."""
+
         self.optimizer.zero_grad()
 
         batch = batch.to(self.device)
