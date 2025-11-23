@@ -1,0 +1,594 @@
+import gymnasium as gym
+import minari
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from einops import rearrange
+from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
+
+# ============================================================================
+# 1. DATA LOADING & PREPROCESSING
+# ============================================================================
+
+
+class MinariTrajectoryDataset(Dataset):
+    """Dataset for loading state-only trajectory sequences from Minari."""
+
+    def __init__(
+        self, dataset_name="D4RL/pointmaze/umaze-v2", horizon=32, normalize=True
+    ):
+        self.horizon = horizon
+        self.dataset = minari.load_dataset(dataset_name, download=True)
+
+        # Extract all state trajectories (no actions)
+        self.trajectories = []
+        for episode in self.dataset:
+            obs = episode.observations
+
+            # PointMaze obs is typically dict with 'observation' and 'achieved_goal'
+            if isinstance(obs, dict):
+                obs = obs["observation"]
+
+            # Store only states, not actions
+            self.trajectories.append(obs)
+
+        # Compute normalization statistics
+        all_data = np.concatenate(self.trajectories, axis=0)
+        self.state_dim = obs.shape[-1]
+        self.action_dim = 2  # Still track this for action recovery
+
+        if normalize:
+            self.mean = all_data.mean(axis=0)
+            self.std = all_data.std(axis=0) + 1e-8
+        else:
+            self.mean = np.zeros_like(all_data[0])
+            self.std = np.ones_like(all_data[0])
+
+        # Create indices for sampling
+        self.indices = []
+        for traj_idx, traj in enumerate(self.trajectories):
+            for t in range(len(traj) - horizon + 1):
+                self.indices.append((traj_idx, t))
+
+    def normalize(self, x):
+        return (x - self.mean) / self.std
+
+    def denormalize(self, x):
+        return x * self.std + self.mean
+
+    def __len__(self):
+        return len(self.indices)
+
+    def __getitem__(self, idx):
+        traj_idx, start_t = self.indices[idx]
+        traj = self.trajectories[traj_idx][start_t : start_t + self.horizon]
+        traj = self.normalize(traj)
+        return torch.FloatTensor(traj)
+
+
+# ============================================================================
+# ACTION RECOVERY FROM STATE TRAJECTORIES
+# ============================================================================
+
+
+def recover_actions_from_states(states, dt=0.05):
+    """
+    Recover actions from state trajectory using differential flatness.
+
+    For PointMaze, state = [x, y, vx, vy]
+    Actions are desired velocities, so we can use finite differences
+    or directly use the velocity from states.
+
+    Args:
+        states: (T, state_dim) - trajectory of states
+        dt: timestep duration
+
+    Returns:
+        actions: (T-1, 2) - recovered actions
+    """
+    # PointMaze typically has state = [x, y, vx, vy]
+    # Actions are [ax, ay] (acceleration commands) or [vx_desired, vy_desired]
+
+    # Option 1: If actions are velocity commands, extract from state
+    if states.shape[-1] >= 4:
+        velocities = states[:, 2:4]  # Extract vx, vy
+        return velocities[:-1]  # Return all but last
+
+    # Option 2: If only positions, compute velocities via finite differences
+    positions = states[:, :2]
+    velocities = np.diff(positions, axis=0) / dt
+    return velocities
+
+
+# ============================================================================
+# 2. TEMPORAL U-NET COMPONENTS
+# ============================================================================
+
+
+class SinusoidalPosEmb(nn.Module):
+    """Sinusoidal positional embeddings for diffusion timesteps."""
+
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = dim
+
+    def forward(self, x):
+        device = x.device
+        half_dim = self.dim // 2
+        emb = np.log(10000) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
+        emb = x[:, None] * emb[None, :]
+        emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
+        return emb
+
+
+class ResidualBlock(nn.Module):
+    """Residual block with group normalization and FiLM conditioning."""
+
+    def __init__(self, dim, dim_out, time_emb_dim, groups=8):
+        super().__init__()
+        self.mlp = nn.Sequential(nn.SiLU(), nn.Linear(time_emb_dim, dim_out * 2))
+
+        self.block1 = nn.Sequential(
+            nn.GroupNorm(groups, dim), nn.SiLU(), nn.Conv1d(dim, dim_out, 3, padding=1)
+        )
+
+        self.block2 = nn.Sequential(
+            nn.GroupNorm(groups, dim_out),
+            nn.SiLU(),
+            nn.Conv1d(dim_out, dim_out, 3, padding=1),
+        )
+
+        self.res_conv = nn.Conv1d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
+
+    def forward(self, x, time_emb):
+        h = self.block1(x)
+
+        # FiLM conditioning
+        scale, shift = self.mlp(time_emb).chunk(2, dim=-1)
+        scale = scale[:, :, None]
+        shift = shift[:, :, None]
+        h = h * (scale + 1) + shift
+
+        h = self.block2(h)
+        return h + self.res_conv(x)
+
+
+class TemporalAttention(nn.Module):
+    """Self-attention over temporal dimension."""
+
+    def __init__(self, dim, heads=4):
+        super().__init__()
+        self.heads = heads
+        self.scale = (dim // heads) ** -0.5
+
+        self.to_qkv = nn.Linear(dim, dim * 3)
+        self.to_out = nn.Linear(dim, dim)
+
+    def forward(self, x):
+        b, c, t = x.shape
+        x = rearrange(x, "b c t -> b t c")
+
+        qkv = self.to_qkv(x).chunk(3, dim=-1)
+        q, k, v = map(lambda t: rearrange(t, "b t (h d) -> b h t d", h=self.heads), qkv)
+
+        attn = torch.matmul(q, k.transpose(-2, -1)) * self.scale
+        attn = F.softmax(attn, dim=-1)
+
+        out = torch.matmul(attn, v)
+        out = rearrange(out, "b h t d -> b t (h d)")
+        out = self.to_out(out)
+
+        return rearrange(out, "b t c -> b c t")
+
+
+class TemporalUNet(nn.Module):
+    """1D U-Net for STATE trajectory denoising."""
+
+    def __init__(self, state_dim, hidden_dims=[128, 256, 512], time_dim=64):
+        super().__init__()
+
+        self.time_mlp = nn.Sequential(
+            SinusoidalPosEmb(time_dim),
+            nn.Linear(time_dim, time_dim * 4),
+            nn.SiLU(),
+            nn.Linear(time_dim * 4, time_dim * 4),
+        )
+
+        # Initial projection (input is now just state_dim, not state+action)
+        self.init_conv = nn.Conv1d(state_dim, hidden_dims[0], 3, padding=1)
+
+        # Encoder
+        self.encoder_blocks = nn.ModuleList([])
+        self.encoder_attns = nn.ModuleList([])
+        self.downsamples = nn.ModuleList([])
+
+        dims = [hidden_dims[0]] + list(hidden_dims)
+        for i in range(len(hidden_dims)):
+            self.encoder_blocks.append(
+                ResidualBlock(dims[i], dims[i + 1], time_dim * 4)
+            )
+            self.encoder_attns.append(TemporalAttention(dims[i + 1]))
+            self.downsamples.append(nn.Conv1d(dims[i + 1], dims[i + 1], 4, 2, 1))
+
+        # Bottleneck
+        mid_dim = hidden_dims[-1]
+        self.mid_block1 = ResidualBlock(mid_dim, mid_dim, time_dim * 4)
+        self.mid_attn = TemporalAttention(mid_dim)
+        self.mid_block2 = ResidualBlock(mid_dim, mid_dim, time_dim * 4)
+
+        # Decoder
+        self.decoder_blocks = nn.ModuleList([])
+        self.decoder_attns = nn.ModuleList([])
+        self.upsamples = nn.ModuleList([])
+
+        for i in reversed(range(len(hidden_dims))):
+            self.upsamples.append(nn.ConvTranspose1d(dims[i + 1], dims[i + 1], 4, 2, 1))
+            self.decoder_blocks.append(
+                ResidualBlock(dims[i + 1] * 2, dims[i], time_dim * 4)
+            )
+            self.decoder_attns.append(TemporalAttention(dims[i]))
+
+        # Final projection (output is state_dim)
+        self.final_conv = nn.Sequential(
+            nn.GroupNorm(8, hidden_dims[0]),
+            nn.SiLU(),
+            nn.Conv1d(hidden_dims[0], state_dim, 3, padding=1),
+        )
+
+    def forward(self, x, time):
+        # x: (batch, horizon, input_dim)
+        x = rearrange(x, "b t c -> b c t")
+
+        t_emb = self.time_mlp(time)
+
+        x = self.init_conv(x)
+
+        # Encoder
+        skips = []
+        for block, attn, downsample in zip(
+            self.encoder_blocks, self.encoder_attns, self.downsamples
+        ):
+            x = block(x, t_emb)
+            x = attn(x)
+            skips.append(x)
+            x = downsample(x)
+
+        # Bottleneck
+        x = self.mid_block1(x, t_emb)
+        x = self.mid_attn(x)
+        x = self.mid_block2(x, t_emb)
+
+        # Decoder
+        for block, attn, upsample in zip(
+            self.decoder_blocks, self.decoder_attns, self.upsamples
+        ):
+            x = upsample(x)
+            x = torch.cat([x, skips.pop()], dim=1)
+            x = block(x, t_emb)
+            x = attn(x)
+
+        x = self.final_conv(x)
+
+        return rearrange(x, "b c t -> b t c")
+
+
+# ============================================================================
+# 3. DIFFUSION PROCESS
+# ============================================================================
+
+
+class GaussianDiffusion:
+    """Gaussian diffusion process with linear noise schedule."""
+
+    def __init__(self, timesteps=100, beta_start=0.0001, beta_end=0.02):
+        self.timesteps = timesteps
+
+        # Linear beta schedule
+        betas = torch.linspace(beta_start, beta_end, timesteps)
+        alphas = 1 - betas
+        alphas_cumprod = torch.cumprod(alphas, dim=0)
+
+        self.betas = betas
+        self.alphas = alphas
+        self.alphas_cumprod = alphas_cumprod
+        self.sqrt_alphas_cumprod = torch.sqrt(alphas_cumprod)
+        self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1 - alphas_cumprod)
+
+    def q_sample(self, x_start, t, noise=None):
+        """Forward diffusion: add noise to x_start."""
+        if noise is None:
+            noise = torch.randn_like(x_start)
+
+        sqrt_alphas_cumprod_t = self.sqrt_alphas_cumprod[t][:, None, None]
+        sqrt_one_minus_alphas_cumprod_t = self.sqrt_one_minus_alphas_cumprod[t][
+            :, None, None
+        ]
+
+        return sqrt_alphas_cumprod_t * x_start + sqrt_one_minus_alphas_cumprod_t * noise
+
+    def p_losses(self, model, x_start, t):
+        """Compute denoising loss."""
+        noise = torch.randn_like(x_start)
+        x_noisy = self.q_sample(x_start, t, noise)
+        predicted_noise = model(x_noisy, t)
+        return F.mse_loss(predicted_noise, noise)
+
+    @torch.no_grad()
+    def p_sample(self, model, x, t, t_index):
+        """Single denoising step."""
+        betas_t = self.betas[t][:, None, None]
+        sqrt_one_minus_alphas_cumprod_t = self.sqrt_one_minus_alphas_cumprod[t][
+            :, None, None
+        ]
+        sqrt_recip_alphas_t = torch.sqrt(1.0 / self.alphas[t])[:, None, None]
+
+        predicted_noise = model(x, t)
+        model_mean = sqrt_recip_alphas_t * (
+            x - betas_t * predicted_noise / sqrt_one_minus_alphas_cumprod_t
+        )
+
+        if t_index == 0:
+            return model_mean
+        else:
+            noise = torch.randn_like(x)
+            return model_mean + torch.sqrt(betas_t) * noise
+
+    @torch.no_grad()
+    def p_sample_loop(self, model, shape, device):
+        """Full reverse diffusion sampling."""
+        b = shape[0]
+        x = torch.randn(shape, device=device)
+
+        for i in reversed(range(self.timesteps)):
+            t = torch.full((b,), i, device=device, dtype=torch.long)
+            x = self.p_sample(model, x, t, i)
+
+        return x
+
+    @torch.no_grad()
+    def inpaint_sample_loop(
+        self, model, shape, device, condition_mask, condition_value
+    ):
+        """Sampling with inpainting (fix certain timesteps/dimensions)."""
+        b = shape[0]
+        x = torch.randn(shape, device=device)
+
+        for i in reversed(range(self.timesteps)):
+            t = torch.full((b,), i, device=device, dtype=torch.long)
+            x = self.p_sample(model, x, t, i)
+
+            # Apply conditioning
+            x = torch.where(condition_mask, condition_value, x)
+
+        return x
+
+
+# ============================================================================
+# 4. TRAINING
+# ============================================================================
+
+
+class DiffuserTrainer:
+    """Training infrastructure for Diffuser."""
+
+    def __init__(self, model, diffusion, dataset, lr=2e-4, device="cuda"):
+        self.model = model.to(device)
+        self.diffusion = diffusion
+        self.device = device
+
+        self.optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        self.dataloader = DataLoader(
+            dataset, batch_size=256, shuffle=True, num_workers=4
+        )
+
+        # Move diffusion schedule to device
+        for attr in [
+            "betas",
+            "alphas",
+            "alphas_cumprod",
+            "sqrt_alphas_cumprod",
+            "sqrt_one_minus_alphas_cumprod",
+        ]:
+            setattr(self.diffusion, attr, getattr(self.diffusion, attr).to(device))
+
+        # EMA
+        self.ema_model = torch.optim.swa_utils.AveragedModel(
+            model, multi_avg_fn=torch.optim.swa_utils.get_ema_multi_avg_fn(0.995)
+        )
+
+    def train_step(self, batch):
+        self.optimizer.zero_grad()
+
+        batch = batch.to(self.device)
+        t = torch.randint(
+            0, self.diffusion.timesteps, (batch.shape[0],), device=self.device
+        ).long()
+
+        loss = self.diffusion.p_losses(self.model, batch, t)
+        loss.backward()
+
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+        self.optimizer.step()
+        self.ema_model.update_parameters(self.model)
+
+        return loss.item()
+
+    def train(self, epochs=100):
+        self.model.train()
+
+        for epoch in range(epochs):
+            epoch_losses = []
+            pbar = tqdm(self.dataloader, desc=f"Epoch {epoch+1}/{epochs}")
+
+            for batch in pbar:
+                loss = self.train_step(batch)
+                epoch_losses.append(loss)
+                pbar.set_postfix({"loss": f"{loss:.4f}"})
+
+            avg_loss = np.mean(epoch_losses)
+            print(f"Epoch {epoch+1} - Average Loss: {avg_loss:.4f}")
+
+            # Save checkpoint
+            self.save_checkpoint(f"diffuser_checkpoint_epoch_{epoch+1}.pt")
+
+    def save_checkpoint(self, path):
+        torch.save(
+            {
+                "model": self.model.state_dict(),
+                "ema_model": self.ema_model.state_dict(),
+                "optimizer": self.optimizer.state_dict(),
+            },
+            path,
+        )
+
+    def load_checkpoint(self, path):
+        checkpoint = torch.load(path)
+        self.model.load_state_dict(checkpoint["model"])
+        self.ema_model.load_state_dict(checkpoint["ema_model"])
+        self.optimizer.load_state_dict(checkpoint["optimizer"])
+
+
+# ============================================================================
+# 5. PLANNING & INFERENCE
+# ============================================================================
+
+
+class DiffuserPlanner:
+    """Planning with trained diffusion model (STATE-ONLY)."""
+
+    def __init__(self, model, diffusion, dataset, device="cuda"):
+        self.model = model.to(device)
+        self.diffusion = diffusion
+        self.dataset = dataset
+        self.device = device
+
+        # Move diffusion schedule to device
+        for attr in [
+            "betas",
+            "alphas",
+            "alphas_cumprod",
+            "sqrt_alphas_cumprod",
+            "sqrt_one_minus_alphas_cumprod",
+        ]:
+            setattr(self.diffusion, attr, getattr(self.diffusion, attr).to(device))
+
+    @torch.no_grad()
+    def plan(self, current_obs, horizon=32):
+        """Generate STATE trajectory conditioned on current observation."""
+        self.model.eval()
+
+        # Normalize current observation
+        current_obs_normalized = (current_obs - self.dataset.mean) / self.dataset.std
+
+        # Create conditioning mask (fix first state)
+        shape = (1, horizon, self.dataset.state_dim)
+        condition_mask = torch.zeros(shape, device=self.device, dtype=torch.bool)
+        condition_mask[0, 0, :] = True  # Fix entire first state
+
+        condition_value = torch.zeros(shape, device=self.device)
+        condition_value[0, 0, :] = torch.FloatTensor(current_obs_normalized).to(
+            self.device
+        )
+
+        # Generate STATE trajectory with inpainting
+        trajectory = self.diffusion.inpaint_sample_loop(
+            self.model, shape, self.device, condition_mask, condition_value
+        )
+
+        # Denormalize
+        trajectory = trajectory.cpu().numpy()[0]
+        trajectory = self.dataset.denormalize(trajectory)
+
+        # Recover actions from state trajectory using differential flatness
+        actions = recover_actions_from_states(trajectory)
+
+        return trajectory, actions
+
+
+# ============================================================================
+# 6. EVALUATION
+# ============================================================================
+
+
+def evaluate_policy(
+    planner, env_name="PointMaze_UMaze-v3", num_episodes=10, max_steps=300
+):
+    """Evaluate diffuser policy in environment."""
+    env = gym.make(env_name)
+
+    successes = []
+    returns = []
+
+    for ep in range(num_episodes):
+        obs, _ = env.reset()
+        if isinstance(obs, dict):
+            obs = obs["observation"]
+
+        episode_return = 0
+
+        for step in range(max_steps):
+            # Plan STATE trajectory, recover actions via differential flatness
+            states, actions = planner.plan(obs)
+
+            # Execute first action (receding horizon)
+            action = actions[0]
+            obs, reward, terminated, truncated, info = env.step(action)
+
+            if isinstance(obs, dict):
+                obs = obs["observation"]
+
+            episode_return += reward
+
+            if terminated or truncated:
+                break
+
+        successes.append(info.get("success", False))
+        returns.append(episode_return)
+
+        print(f"Episode {ep+1}: Return={episode_return:.2f}, Success={successes[-1]}")
+
+    env.close()
+
+    print(f"\nAverage Return: {np.mean(returns):.2f} ± {np.std(returns):.2f}")
+    print(f"Success Rate: {np.mean(successes)*100:.1f}%")
+
+    return returns, successes
+
+
+# ============================================================================
+# MAIN USAGE EXAMPLE
+# ============================================================================
+
+if __name__ == "__main__":
+    # Setup
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # 1. Load dataset
+    print("Loading dataset...")
+    dataset = MinariTrajectoryDataset("D4RL/pointmaze/umaze-v2", horizon=32)
+    print(f"Dataset loaded: {len(dataset)} trajectory segments")
+    print(f"State dim: {dataset.state_dim}, Action dim: {dataset.action_dim}")
+
+    # 2. Create model
+    print("\nCreating model...")
+    model = TemporalUNet(dataset.state_dim, hidden_dims=[128, 256, 512])
+    print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+    print(f"Model input/output: state trajectories only (dim={dataset.state_dim})")
+
+    # 3. Create diffusion
+    diffusion = GaussianDiffusion(timesteps=100)
+
+    # 4. Train
+    print("\nTraining...")
+    trainer = DiffuserTrainer(model, diffusion, dataset, device=device)
+    trainer.train(epochs=100)
+
+    # 5. Evaluate
+    print("\nEvaluating...")
+    planner = DiffuserPlanner(
+        trainer.ema_model.module, diffusion, dataset, device=device
+    )
+    evaluate_policy(planner, num_episodes=10)

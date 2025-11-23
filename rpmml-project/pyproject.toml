@@ -9,8 +9,16 @@ description = "Final project for ECE531 at Princeton."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-   "matplotlib",
-   "numpy",
+    "matplotlib",
+    "numpy",
+    "minari",
+    "gymnasium",
+    "gymnasium_robotics",
+    "typed-argument-parser",
+    "GitPython",
+    "tqdm",
+    "minari[hf]",
+    "minari[hfd5]"
 ]
 
 [project.optional-dependencies]
