@@ -139,20 +139,30 @@ class MinariTrajectoryDatasetWithActions(Dataset):
 
         obs_window = traj["obs"][start_t:start_t + self.horizon]
         act_window = traj["act"][start_t:start_t + self.horizon]
-
-        obs_window_norm = self.normalize(obs_window)
+        
+        
 
         return {
-            "obs": torch.FloatTensor(obs_window_norm),   # normalized (T, state_dim)
+            "obs": torch.FloatTensor(obs_window),   # normalized (T, state_dim)
             "act": torch.FloatTensor(act_window)         # raw (T, action_dim)
         }
 
 # ============================================================================
 # ACTION RECOVERY FROM STATE TRAJECTORIES
 # ============================================================================
+# computing dt 
+def estimate_dt_from_obs(pos, vel):
+    dx = pos[1:] - pos[:-1]                 # Δx
+    dist = np.linalg.norm(dx, axis=1)       # ‖Δx‖
+    speed = np.linalg.norm(vel[:-1], axis=1)
+
+    mask = speed > 1e-6                     # avoid division by zero
+    dt_est = dist[mask] / speed[mask]
+
+    return np.mean(dt_est)
 
 
-def recover_actions_from_states(states, dt=0.05):
+def recover_actions_from_states(states, dt=0.01, m= 0.0424):
     """
     Compute velocity (T-1,2) and acceleration (T-2,2) 
     aligned with transitions.
@@ -185,7 +195,7 @@ def recover_actions_from_states(states, dt=0.05):
     velocities = (positions[1:] - positions[:-1]) / dt    # (T-1,2)
 
     # a_t associated with transition v_t -> v_{t+1}
-    accelerations = (velocities[1:] - velocities[:-1]) / dt   # (T-2,2)
+    accelerations = (velocities[1:] - velocities[:-1]) / (dt)   # (T-2,2)
 
     return velocities, accelerations
 
