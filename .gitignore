@@ -82,6 +82,7 @@ target/
 # Jupyter Notebook
 .ipynb_checkpoints
 diffuser_checkpoint_epoch_*.pt
+diffuser_improved_epoch_*.pt
 
 # IPython
 profile_default/
