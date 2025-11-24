@@ -68,6 +68,85 @@ class MinariTrajectoryDataset(Dataset):
         return torch.FloatTensor(traj)
 
 
+class MinariTrajectoryDatasetWithActions(Dataset):
+    """Dataset for loading state + action trajectory windows from Minari."""
+
+    def __init__(self, dataset_name="D4RL/pointmaze/umaze-v2", horizon=32, normalize=True):
+        self.horizon = horizon
+        self.dataset = minari.load_dataset(dataset_name, download=True)
+
+        # List of dict trajectories: {"obs": (T,4), "act": (T,2)}
+        self.trajectories = []
+        for episode in self.dataset:
+            obs = episode.observations
+            act = episode.actions
+
+            # Handle dict observations used in PointMaze
+            if isinstance(obs, dict):
+                obs = obs["observation"]
+
+            self.trajectories.append({
+                "obs": obs,      # (T, state_dim)
+                "act": act       # (T, action_dim)
+            })
+
+        # Infer dims
+        example_obs = self.trajectories[0]["obs"]
+        example_act = self.trajectories[0]["act"]
+
+        self.state_dim = example_obs.shape[-1]   # normally 4: [x,y,vx,vy]
+        self.action_dim = example_act.shape[-1]  # normally 2: [ax,ay]
+
+        # -----------------------------------------------------------
+        # Compute normalization statistics (ONLY for states)
+        # -----------------------------------------------------------
+        all_obs = np.concatenate([traj["obs"] for traj in self.trajectories], axis=0)
+
+        if normalize:
+            self.mean = all_obs.mean(axis=0)
+            self.std = all_obs.std(axis=0) + 1e-8
+        else:
+            self.mean = np.zeros(self.state_dim)
+            self.std  = np.ones(self.state_dim)
+
+        # -----------------------------------------------------------
+        # Build sampling index list (traj_idx, start_time)
+        # -----------------------------------------------------------
+        self.indices = []
+        for traj_idx, traj in enumerate(self.trajectories):
+            T = len(traj["obs"])
+            for t in range(T - horizon + 1):
+                self.indices.append((traj_idx, t))
+
+    # -----------------------------------------------------------
+    # Normalization utilities
+    # -----------------------------------------------------------
+    def normalize(self, x):
+        return (x - self.mean) / self.std
+
+    def denormalize(self, x):
+        return x * self.std + self.mean
+
+    # -----------------------------------------------------------
+    # PyTorch Dataset API
+    # -----------------------------------------------------------
+    def __len__(self):
+        return len(self.indices)
+
+    def __getitem__(self, idx):
+        traj_idx, start_t = self.indices[idx]
+        traj = self.trajectories[traj_idx]
+
+        obs_window = traj["obs"][start_t:start_t + self.horizon]
+        act_window = traj["act"][start_t:start_t + self.horizon]
+
+        obs_window_norm = self.normalize(obs_window)
+
+        return {
+            "obs": torch.FloatTensor(obs_window_norm),   # normalized (T, state_dim)
+            "act": torch.FloatTensor(act_window)         # raw (T, action_dim)
+        }
+
 # ============================================================================
 # ACTION RECOVERY FROM STATE TRAJECTORIES
 # ============================================================================
@@ -75,32 +154,170 @@ class MinariTrajectoryDataset(Dataset):
 
 def recover_actions_from_states(states, dt=0.05):
     """
-    Recover actions from state trajectory using differential flatness.
-
-    For PointMaze, state = [x, y, vx, vy]
-    Actions are desired velocities, so we can use finite differences
-    or directly use the velocity from states.
+    Compute velocity (T-1,2) and acceleration (T-2,2) 
+    aligned with transitions.
 
     Args:
-        states: (T, state_dim) - trajectory of states
-        dt: timestep duration
+        states: (T, >=2) array containing positions in first 2 dims
+        dt: timestep
 
     Returns:
-        actions: (T-1, 2) - recovered actions
+        velocities:    (T-1, 2)
+        accelerations: (T-2, 2)
     """
+
     # PointMaze typically has state = [x, y, vx, vy]
     # Actions are [ax, ay] (acceleration commands) or [vx_desired, vy_desired]
 
-    # Option 1: If actions are velocity commands, extract from state
-    if states.shape[-1] >= 4:
-        velocities = states[:, 2:4]  # Extract vx, vy
-        return velocities[:-1]  # Return all but last
+    # # Option 1: If actions are velocity commands, extract from state
+    # if states.shape[-1] >= 4:
+    #     velocities = states[:, 2:4]  # Extract vx, vy
+    #     velocities = velocities[:-1]
+    #     accelerations = (velocities[1:] - velocities[:-1]) / dt
+    #     return velocities, accelerations
 
     # Option 2: If only positions, compute velocities via finite differences
-    positions = states[:, :2]
-    velocities = np.diff(positions, axis=0) / dt
-    return velocities
+    # sticking with this since we are now pursuing the flattened state definition
+    positions = states[:, :2]        # (T,2)
 
+    
+    # v_t associated with transition s_t -> s_{t+1}
+    velocities = (positions[1:] - positions[:-1]) / dt    # (T-1,2)
+
+    # a_t associated with transition v_t -> v_{t+1}
+    accelerations = (velocities[1:] - velocities[:-1]) / dt   # (T-2,2)
+
+    return velocities, accelerations
+
+# ============================================================
+# 1. Estimate sparse velocities (average per segment)
+# ============================================================
+
+def estimate_sparse_velocities(skip_list, dt):
+    """
+    Given skip_list = [(pos_i, skip_i), ...],
+    extract positions, skip amounts, and estimate average velocities.
+
+    Returns:
+        positions: (N,2)
+        velocities: (N,2)   (average for each segment)
+        skips: list of ints
+    """
+    positions = np.array([p for (p, k) in skip_list])
+    skips = [k for (p, k) in skip_list]
+
+    N = len(positions)
+    velocities = np.zeros((N, 2))
+
+    for i in range(N - 1):
+        k = skips[i]
+        T = k * dt
+        velocities[i] = (positions[i+1] - positions[i]) / T
+
+    velocities[-1] = velocities[-2]  # last velocity: just copy previous
+
+    return positions, velocities, skips
+
+
+# ============================================================
+# 2. Hermite spline segment (WITH CORRECT VELOCITY SCALING)
+# ============================================================
+
+def hermite_segment(p0, v0_scaled, p1, v1_scaled, num_points):
+    """
+    Hermite spline between p0 and p1 with endpoint derivatives v0_scaled, v1_scaled.
+
+    v0_scaled, v1_scaled MUST BE SCALED BY SEGMENT DURATION.
+
+    Returns:
+        p: (num_points, 2)
+        v: (num_points, 2)   derivative wrt spline time (not physical!)
+        a: (num_points, 2)
+    """
+    t = np.linspace(0, 1, num_points)
+
+    # Hermite basis
+    h00 =  2*t**3 - 3*t**2 + 1
+    h10 =      t**3 - 2*t**2 + t
+    h01 = -2*t**3 + 3*t**2
+    h11 =      t**3 -   t**2
+
+    p = (h00[:,None]*p0 +
+         h10[:,None]*v0_scaled +
+         h01[:,None]*p1 +
+         h11[:,None]*v1_scaled)
+
+    # Velocity basis
+    dh00 =  6*t**2 - 6*t
+    dh10 =  3*t**2 - 4*t + 1
+    dh01 = -6*t**2 + 6*t
+    dh11 =  3*t**2 - 2*t
+
+    v = (dh00[:,None]*p0 +
+         dh10[:,None]*v0_scaled +
+         dh01[:,None]*p1 +
+         dh11[:,None]*v1_scaled)
+
+    # Acceleration basis
+    d2h00 = 12*t - 6
+    d2h10 =  6*t - 4
+    d2h01 = -12*t + 6
+    d2h11 =  6*t - 2
+
+    a = (d2h00[:,None]*p0 +
+         d2h10[:,None]*v0_scaled +
+         d2h01[:,None]*p1 +
+         d2h11[:,None]*v1_scaled)
+
+    return p, v, a
+
+
+# ============================================================
+# 3. Expand skip_list into full spline trajectory
+# ============================================================
+
+def expand_spline_from_skip_list(skip_list, dt=0.05):
+    """
+    Convert skip_list → dense spline-based trajectory.
+    Ensures the last sample of each segment equals the next sparse waypoint.
+
+    Returns:
+        full_p: (T,2)
+        full_v: (T,2)
+        full_a: (T,2)
+    """
+
+    positions, velocities, skips = estimate_sparse_velocities(skip_list, dt)
+
+    full_p, full_v, full_a = [], [], []
+
+    for i in range(len(positions) - 1):
+
+        p0 = positions[i]
+        p1 = positions[i+1]
+
+        k  = skips[i]
+        T  = k * dt          # physical duration of this segment
+
+        # SCALE velocities to spline coordinates
+        v0_scaled = velocities[i]     * T
+        v1_scaled = velocities[i+1]   * T
+
+        num_samples = k + 1           # must produce exactly k+1 samples
+
+        P, V, A = hermite_segment(p0, v0_scaled, p1, v1_scaled, num_samples)
+
+        # avoid duplication at segment seam
+        if len(full_p) > 0:
+            P = P[1:]
+            V = V[1:]
+            A = A[1:]
+
+        full_p.extend(P)
+        full_v.extend(V)
+        full_a.extend(A)
+
+    return np.array(full_p), np.array(full_v), np.array(full_a)
 
 # ============================================================================
 # 2. TEMPORAL U-NET COMPONENTS
