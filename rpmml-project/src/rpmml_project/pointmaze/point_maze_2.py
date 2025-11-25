@@ -7,10 +7,6 @@ from einops import rearrange
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-# ============================================================================
-# DATA
-# ============================================================================
-
 
 class MinariTrajectoryDataset(Dataset):
     def __init__(self, dataset_name="D4RL/pointmaze/umaze-v2", horizon=32):
@@ -47,11 +43,6 @@ class MinariTrajectoryDataset(Dataset):
         traj_idx, start_t = self.indices[idx]
         traj = self.trajectories[traj_idx][start_t : start_t + self.horizon]
         return torch.FloatTensor(self.normalize(traj))
-
-
-# ============================================================================
-# REWARD FUNCTIONS
-# ============================================================================
 
 
 class StartReachingReward:
@@ -99,11 +90,6 @@ class CompositeReward:
         rewards = torch.stack([fn(trajectories) for fn in self.reward_fns], dim=1)
         weights = self.weights.to(trajectories.device)
         return (rewards * weights[None, :]).sum(dim=1)
-
-
-# ============================================================================
-# MODEL
-# ============================================================================
 
 
 class SinusoidalPosEmb(nn.Module):
@@ -266,11 +252,6 @@ class TemporalUNet(nn.Module):
             x = x[:, :, :original_length]
 
         return rearrange(x, "b c t -> b t c")
-
-
-# ============================================================================
-# DIFFUSION - FIXED VERSION
-# ============================================================================
 
 
 class GaussianDiffusion(nn.Module):
@@ -465,17 +446,43 @@ class GaussianDiffusion(nn.Module):
         return xt
 
 
-# ============================================================================
-# TRAINING
-# ============================================================================
+class EMA:
+    def __init__(self, model, beta=0.999):  # Higher beta for more stability
+        self.model = model
+        self.beta = beta
+        self.shadow = {
+            name: param.clone().detach() for name, param in model.named_parameters()
+        }
+
+    def update(self, model):
+        for name, param in model.named_parameters():
+            self.shadow[name].mul_(self.beta).add_(param.data, alpha=1 - self.beta)
+
+    def copy_to(self, model):
+        for name, param in model.named_parameters():
+            param.data.copy_(self.shadow[name])
 
 
 class DiffuserTrainer:
+    """Improved trainer with better batch size and learning rate schedule."""
+
     def __init__(self, model, diffusion, dataset, lr=1e-4, device="cuda"):
         self.model = model.to(device)
         self.diffusion = diffusion.to(device)
         self.device = device
-        self.optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+
+        self.optimizer = torch.optim.AdamW(  # Use AdamW for better regularization
+            model.parameters(), lr=lr, weight_decay=1e-4
+        )
+
+        # Cosine annealing schedule
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            self.optimizer, T_max=100, eta_min=1e-6
+        )
+
+        self.ema = EMA(model, beta=0.999)
+
+        # Smaller batch size for better gradient estimates
         self.dataloader = DataLoader(
             dataset, batch_size=128, shuffle=True, num_workers=4
         )
@@ -485,41 +492,61 @@ class DiffuserTrainer:
         t = torch.randint(
             0, self.diffusion.timesteps, (batch.shape[0],), device=self.device
         ).long()
+
         loss = self.diffusion.p_losses(self.model, batch, t)
 
         self.optimizer.zero_grad()
         loss.backward()
-        nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+        nn.utils.clip_grad_norm_(self.model.parameters(), 0.5)  # Tighter clipping
         self.optimizer.step()
+
+        self.ema.update(self.model)
 
         return loss.item()
 
     def train(self, epochs=100):
         self.model.train()
+
         for epoch in range(epochs):
-            losses = []
-            for batch in tqdm(self.dataloader, desc=f"Epoch {epoch+1}"):
-                losses.append(self.train_step(batch))
-            print(f"Epoch {epoch+1}: Loss = {np.mean(losses):.4f}")
+            epoch_losses = []
+            pbar = tqdm(self.dataloader, desc=f"Epoch {epoch+1}/{epochs}")
 
-    def save(self, path):
-        torch.save(self.model.state_dict(), path)
+            for batch in pbar:
+                loss = self.train_step(batch)
+                epoch_losses.append(loss)
+                pbar.set_postfix(
+                    {
+                        "loss": f"{loss:.4f}",
+                        "lr": f"{self.scheduler.get_last_lr()[0]:.2e}",
+                    }
+                )
 
-    def load(self, path):
-        checkpoint = torch.load(path, map_location=self.device)
+            avg_loss = np.mean(epoch_losses)
+            print(
+                f"Epoch {epoch+1} - Loss: {avg_loss:.4f}, LR: {self.scheduler.get_last_lr()[0]:.2e}"
+            )
 
-        # Handle both formats: direct state_dict or full checkpoint
-        if "model" in checkpoint:
-            # Full checkpoint with model, ema_shadow, optimizer, scheduler
-            self.model.load_state_dict(checkpoint["model"])
-        else:
-            # Direct state_dict
-            self.model.load_state_dict(checkpoint)
+            self.scheduler.step()
 
+            self.save_checkpoint(f"checkpoints/diffuser_improved_epoch_{epoch+1}.pt")
 
-# ============================================================================
-# PLANNING - FIXED VERSION
-# ============================================================================
+    def save_checkpoint(self, path):
+        torch.save(
+            {
+                "model": self.model.state_dict(),
+                "ema_shadow": self.ema.shadow,
+                "optimizer": self.optimizer.state_dict(),
+                "scheduler": self.scheduler.state_dict(),
+            },
+            path,
+        )
+
+    def load_checkpoint(self, path):
+        checkpoint = torch.load(path, map_location=self.device, weights_only=True)
+        self.model.load_state_dict(checkpoint["model"])
+        self.ema.shadow = checkpoint["ema_shadow"]
+        self.optimizer.load_state_dict(checkpoint["optimizer"])
+        self.scheduler.load_state_dict(checkpoint["scheduler"])
 
 
 class DiffuserPlanner:
@@ -543,12 +570,7 @@ class DiffuserPlanner:
         conditioning_strength=0.5,  # NEW: reduced from 1.0 for softer conditioning
     ):
         """
-        FIXED VERSION: Uses soft conditioning to respect learned physics
-
-        Key improvements:
-        1. Soft conditioning instead of hard replacement
-        2. Annealing schedule that reduces conditioning over time
-        3. Lower default conditioning strength
+        Uses soft conditioning to respect learned physics while planning.
 
         Args:
             conditioning_schedule: "linear", "cosine", or "constant"
@@ -607,10 +629,6 @@ class DiffuserPlanner:
         return trajectory
 
 
-# ============================================================================
-# EXAMPLE USAGE
-# ============================================================================
-
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -624,8 +642,8 @@ if __name__ == "__main__":
     # Train (or load)
     trainer = DiffuserTrainer(model, diffusion, dataset, device=device)
     # trainer.train(epochs=100)
-    # trainer.save("diffuser_model.pt")
-    trainer.load("checkpoints/diffuser_improved_epoch_100.pt")
+    # trainer.save("checkpoints/diffuser_v2_epoch_100.pt")
+    trainer.load_checkpoint("checkpoints/diffuser_v2_epoch_100.pt")
 
     # Plan
     planner = DiffuserPlanner(model, diffusion, dataset, device=device)
