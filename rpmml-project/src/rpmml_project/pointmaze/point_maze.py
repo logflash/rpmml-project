@@ -67,6 +67,129 @@ class MinariTrajectoryDataset(Dataset):
         traj = self.normalize(traj)
         return torch.FloatTensor(traj)
 
+class MinariTrajectoryDatasetWithPseudoActions(Dataset):
+    """Dataset for loading state (position) and skip-value trajectory sequences from Minari."""
+
+    def __init__(
+        self, dataset_name="D4RL/pointmaze/umaze-v2", horizon=3, normalize=True,
+        n_chunks_frac=0.1, alpha=3.0,
+    ):
+        # TODO: tune n_chunks_frac and alpha for better performance
+        self.horizon = horizon
+        self.n_chunks_frac = n_chunks_frac
+        self.alpha = alpha
+        self.normalize_flag = normalize
+
+        # Load dataset
+        self.dataset = minari.load_dataset(dataset_name, download=True)
+
+        # Store full state trajectories separately (for normalization)
+        self.state_trajectories = []
+        # Store skip lists separately
+        self.skip_trajectories = []
+
+        # ---------------------------------------------------------
+        # Process each episode
+        # ---------------------------------------------------------
+        for episode in self.dataset:
+            obs = episode.observations
+
+            # Handle dict observations used in PointMaze
+            if isinstance(obs, dict):
+                obs = obs["observation"]
+
+            states = obs                   # full raw states (T, state_dim)
+            T = len(states)
+            positions = states[:, :2]      # (T, 2)
+            velocities = states[:, 2:4]    # (T, 2) (not used yet but kept)
+
+            # --- Dirichlet chunks ---
+            n_chunks = max(1, int(self.n_chunks_frac * T))
+            chunks = self._dirichlet_chunks(T, n_chunks=n_chunks, alpha=self.alpha)
+
+            # --- Build skip_list ---
+            skip_list = []
+            tau = 0.0
+            for chunk in chunks:
+                
+                tau_clamped = min(tau, T - 1)
+                idx = int(np.floor(tau_clamped))
+                delta_t = tau_clamped - idx  # in [0,1)
+
+                if idx >= T - 1:
+                    pos = positions[-1]
+                else:
+                    # simple linear interpolation
+                    pos = positions[idx] + (positions[idx + 1] - positions[idx]) * delta_t
+
+                skip_list.append((pos, chunk, tau_clamped))
+                tau += chunk
+
+
+            # Save both sequences
+            self.state_trajectories.append(states)
+            self.skip_trajectories.append(skip_list)
+
+        # ---------------------------------------------------------
+        # NORMALIZATION over raw states
+        # ---------------------------------------------------------
+        all_states = np.concatenate(self.state_trajectories, axis=0)
+        self.state_dim = all_states.shape[-1]
+
+        if normalize:
+            self.mean = all_states.mean(axis=0)
+            self.std  = all_states.std(axis=0) + 1e-8
+        else:
+            self.mean = np.zeros(self.state_dim)
+            self.std  = np.ones(self.state_dim)
+
+        # ---------------------------------------------------------
+        # Build horizon indices over skip trajectories
+        # ---------------------------------------------------------
+        self.indices = []
+        for traj_idx, skip_list in enumerate(self.skip_trajectories):
+            S = len(skip_list)
+            if S >= self.horizon:
+                for t in range(S - self.horizon + 1):
+                    self.indices.append((traj_idx, t))
+
+    # ---------------------------------------------------------
+    def normalize(self, x):
+        return (x - self.mean) / self.std
+
+    def denormalize(self, x):
+        return x * self.std + self.mean
+
+    # ---------------------------------------------------------
+    @staticmethod
+    def _dirichlet_chunks(total_T, n_chunks, alpha):
+        weights = np.random.dirichlet([alpha] * n_chunks)
+        return weights * total_T
+
+    # ---------------------------------------------------------
+    def __len__(self):
+        return len(self.indices)
+
+    def __getitem__(self, idx):
+        traj_idx, start = self.indices[idx]
+
+        skip_list = self.skip_trajectories[traj_idx]
+
+        # Extract window of length horizon
+        window = skip_list[start:start + self.horizon]
+
+        # Unpack window into arrays
+        positions = np.array([p for (p, c, tau) in window], dtype=np.float32)  # (H,2)
+        skip_vals = np.array([c for (p, c, tau) in window], dtype=np.float32)  # (H,)
+        tau_vals  = np.array([tau for (p, c, tau) in window], dtype=np.float32)  # (H,)
+
+        return (
+            torch.FloatTensor(positions),   # (H,2)
+            torch.FloatTensor(skip_vals),   # (H,)
+            torch.FloatTensor(tau_vals)     # (H,)
+        )
+ 
+
 
 class MinariTrajectoryDatasetWithActions(Dataset):
     """Dataset for loading state + action trajectory windows from Minari."""
@@ -143,7 +266,7 @@ class MinariTrajectoryDatasetWithActions(Dataset):
         
 
         return {
-            "obs": torch.FloatTensor(obs_window),   # normalized (T, state_dim)
+            "obs": torch.FloatTensor(obs_window),   # (T, state_dim)
             "act": torch.FloatTensor(act_window)         # raw (T, action_dim)
         }
 
