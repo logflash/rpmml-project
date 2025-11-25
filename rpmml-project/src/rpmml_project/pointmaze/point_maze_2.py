@@ -217,6 +217,17 @@ class TemporalUNet(nn.Module):
 
     def forward(self, x, time):
         x = rearrange(x, "b t c -> b c t")
+        original_length = x.shape[2]
+
+        # Pad to make divisible by 2^num_downsamples (8 in this case: 2^3)
+        num_downsamples = len(self.downsamples)
+        pad_factor = 2**num_downsamples
+        padded_length = ((original_length + pad_factor - 1) // pad_factor) * pad_factor
+
+        if padded_length != original_length:
+            pad_amount = padded_length - original_length
+            x = F.pad(x, (0, pad_amount), mode="replicate")
+
         t_emb = self.time_mlp(time)
         x = self.init_conv(x)
 
@@ -240,11 +251,20 @@ class TemporalUNet(nn.Module):
             self.decoder_blocks, self.decoder_attns, self.upsamples
         ):
             x = upsample(x)
-            x = torch.cat([x, skips.pop()], dim=1)
+            skip = skips.pop()
+            # Match dimensions if there's a mismatch due to upsampling
+            if x.shape[2] != skip.shape[2]:
+                x = x[:, :, : skip.shape[2]]
+            x = torch.cat([x, skip], dim=1)
             x = block(x, t_emb)
             x = attn(x)
 
         x = self.final_conv(x)
+
+        # Remove padding if we added any
+        if padded_length != original_length:
+            x = x[:, :, :original_length]
+
         return rearrange(x, "b c t -> b t c")
 
 
