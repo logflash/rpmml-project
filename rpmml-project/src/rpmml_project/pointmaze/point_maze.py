@@ -495,6 +495,8 @@ class ResidualBlock(nn.Module):
         self.res_conv = nn.Conv1d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
 
     def forward(self, x, time_emb):
+        """Forward for residual block."""
+
         h = self.block1(x)
 
         # FiLM conditioning
@@ -519,6 +521,8 @@ class TemporalAttention(nn.Module):
         self.to_out = nn.Linear(dim, dim)
 
     def forward(self, x):
+        """Forward for temporal attention."""
+
         b, c, t = x.shape
         x = rearrange(x, "b c t -> b t c")
 
@@ -590,6 +594,8 @@ class TemporalUNet(nn.Module):
         )
 
     def forward(self, x, time):
+        """Forward for the temporal u-net."""
+
         # x: (batch, horizon, input_dim)
         x = rearrange(x, "b t c -> b c t")
 
@@ -751,6 +757,8 @@ class DiffuserTrainer:
         )
 
     def train_step(self, batch):
+        """A single training step for diffusion training."""
+
         self.optimizer.zero_grad()
 
         batch = batch.to(self.device)
@@ -826,37 +834,60 @@ class DiffuserPlanner:
         ]:
             setattr(self.diffusion, attr, getattr(self.diffusion, attr).to(device))
 
+    #Changed to also accept goal state to condition on
     @torch.no_grad()
-    def plan(self, current_obs, horizon=32):
-        """Generate STATE trajectory conditioned on current observation."""
+    def plan(self, current_obs, goal_obs, horizon=32):
+        """
+        Generate a trajectory from current_obs → goal_obs using diffusion inpainting.
+        """
         self.model.eval()
 
-        # Normalize current observation
-        current_obs_normalized = (current_obs - self.dataset.mean) / self.dataset.std
+        # -------------------------
+        # Convert → 1D np arrays
+        # -------------------------
+        current_obs = np.asarray(current_obs, dtype=np.float32).reshape(-1)
+        goal_obs    = np.asarray(goal_obs,    dtype=np.float32).reshape(-1)
 
-        # Create conditioning mask (fix first state)
+        # -------------------------
+        # Normalize
+        # -------------------------
+        start_norm = (current_obs - self.dataset.mean) / self.dataset.std
+        goal_norm  = (goal_obs    - self.dataset.mean) / self.dataset.std
+
+        start_norm = torch.tensor(start_norm, dtype=torch.float32, device=self.device)
+        goal_norm  = torch.tensor(goal_norm,  dtype=torch.float32, device=self.device)
+
+        # -------------------------
+        # Build conditioning mask/value
+        # -------------------------
         shape = (1, horizon, self.dataset.state_dim)
-        condition_mask = torch.zeros(shape, device=self.device, dtype=torch.bool)
-        condition_mask[0, 0, :] = True  # Fix entire first state
 
-        condition_value = torch.zeros(shape, device=self.device)
-        condition_value[0, 0, :] = torch.FloatTensor(current_obs_normalized).to(
-            self.device
-        )
+        condition_mask  = torch.zeros(shape, dtype=torch.bool, device=self.device)
+        condition_value = torch.zeros(shape, dtype=torch.float32, device=self.device)
 
-        # Generate STATE trajectory with inpainting
+        condition_mask[0, 0, :]  = True
+        condition_mask[0, -1, :] = True
+
+        condition_value[0, 0, :]  = start_norm
+        condition_value[0, -1, :] = goal_norm
+
+        # -------------------------
+        # Run diffusion
+        # -------------------------
         trajectory = self.diffusion.inpaint_sample_loop(
             self.model, shape, self.device, condition_mask, condition_value
         )
 
+        # -------------------------
         # Denormalize
+        # -------------------------
         trajectory = trajectory.cpu().numpy()[0]
         trajectory = self.dataset.denormalize(trajectory)
 
-        # Recover actions from state trajectory using differential flatness
         actions = recover_actions_from_states(trajectory)
-
         return trajectory, actions
+
+
 
 
 # ============================================================================
