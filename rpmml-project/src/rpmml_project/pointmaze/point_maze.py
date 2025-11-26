@@ -110,6 +110,7 @@ class MinariTrajectoryDatasetWithPseudoActions(Dataset):
             # --- Build skip_list ---
             skip_list = []
             tau = 0.0
+            print(chunks)
             for chunk in chunks:
                 
                 tau_clamped = min(tau, T - 1)
