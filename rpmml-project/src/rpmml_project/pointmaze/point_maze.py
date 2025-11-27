@@ -410,7 +410,7 @@ def hermite_segment(p0, v0_scaled, p1, v1_scaled, num_points):
 # 3. Expand skip_list into full spline trajectory
 # ============================================================
 
-def expand_spline_from_skip_list(skip_list, dt=0.05):
+def expand_spline_from_skip_list(skip_list, dt=0.01):
     """
     Convert skip_list → dense spline-based trajectory.
     Ensures the last sample of each segment equals the next sparse waypoint.
