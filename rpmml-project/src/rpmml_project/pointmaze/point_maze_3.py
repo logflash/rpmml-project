@@ -997,8 +997,8 @@ def estimate_sparse_velocities(skip_list, dt):
 
     N = len(positions)
     velocities = np.zeros((N, 2))
-
-    for i in range(N - 1):
+    velocities[0] = np.zeros(2)  # first velocity: zero
+    for i in range(1, N - 1):
         k = skips[i]
         T = k * dt
         velocities[i] = (positions[i+1] - positions[i]) / T
@@ -1118,7 +1118,7 @@ if __name__ == "__main__":
 
     # Use pseudo-action dataset
     dataset = MinariTrajectoryDatasetWithPseudoActions(
-        "D4RL/pointmaze/umaze-v2", horizon=3
+        "D4RL/pointmaze/umaze-v2", horizon=32, n_chunks_frac= 0.5
     )
     print(f"\nDataset size: {len(dataset)} trajectory windows")
     print(f"Trajectory dim (pos+skip): {dataset.traj_dim}")
@@ -1224,17 +1224,106 @@ if __name__ == "__main__":
     # 3. PLOT TRAJECTORY + MUJOCO MAZE WALLS
     # ============================================================
    
-    print("[")
-    for row in pos_dense:
-        print(f"    [{row[0]}, {row[1]}],")
-    print("]")
+    # print("[")
+    # for row in pos_dense:
+    #     print(f"    [{row[0]}, {row[1]}],")
+    # print("]")
 
-    print("[")
-    for row in coarse_pos:
-        print(f"    [{row[0]}, {row[1]}],")
-    print("]")
+    # print("[")
+    # for row in coarse_pos:
+    #     print(f"    [{row[0]}, {row[1]}],")
+    # print("]")
 
-    print("[")
-    for row in coarse_skip:
-        print(f"{row},")
-    print("]")
+    # print("[")
+    # for row in coarse_skip:
+    #     print(f"{row},")
+    # print("]")
+
+
+# -------------------------------------------------------------
+# Extract fields
+# -------------------------------------------------------------
+# pos_dense  = traj["pos_dense"]      # (N,2)
+# vel_dense  = traj["vel_dense"]      # (N,2)
+# acc_dense  = traj["acc_dense"]      # (N,2)
+# coarse_pos  = traj["coarse_pos"]    # (H,2)
+# coarse_skip = traj["coarse_skip"]   # (H,)
+
+    t_dense = np.arange(len(pos_dense))
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    ax_xy, ax_skip, ax_speed, ax_acc = axes.ravel()
+
+    # =============================================================
+    # 1) XY trajectory (dense) + coarse waypoints colored by skip
+    # =============================================================
+    ax_xy.plot(
+        pos_dense[:, 0],
+        pos_dense[:, 1],
+        linewidth=2,
+        label="Dense trajectory"
+    )
+
+    # coarse waypoints
+    sc = ax_xy.scatter(
+        coarse_pos[:, 0],
+        coarse_pos[:, 1],
+        c=coarse_skip,
+        s=60,
+        edgecolors="k",
+        cmap="viridis",
+        label="Coarse waypoints",
+    )
+    cbar = fig.colorbar(sc, ax=ax_xy)
+    cbar.set_label("Skip length")
+
+    # annotate skip values (optional)
+    for i, (x, y) in enumerate(coarse_pos):
+        ax_xy.text(x, y, f"{int(coarse_skip[i])}", fontsize=8,
+                ha="center", va="bottom")
+
+    # start / goal
+    ax_xy.scatter(current[0], current[1], s=120, marker="*", label="Start")
+    ax_xy.scatter(goal[0], goal[1],     s=120, marker="X", label="Goal")
+
+    ax_xy.set_title("XY Trajectory (Dense + Coarse)")
+    ax_xy.set_xlabel("x"); ax_xy.set_ylabel("y")
+    ax_xy.set_aspect("equal", "box")
+    ax_xy.grid(True, alpha=0.3)
+    ax_xy.legend(loc="best")
+
+    # =============================================================
+    # 2) Skip magnitudes vs coarse waypoint index
+    # =============================================================
+    ax_skip.step(
+        np.arange(len(coarse_skip)),
+        coarse_skip,
+        where="mid"
+    )
+    ax_skip.set_xlabel("Waypoint index")
+    ax_skip.set_ylabel("Skip length")
+    ax_skip.set_title("Skip per coarse waypoint")
+    ax_skip.grid(True, alpha=0.3)
+
+    # =============================================================
+    # 3) Speed profile along dense trajectory
+    # =============================================================
+    speed = np.linalg.norm(vel_dense, axis=-1)
+    ax_speed.plot(t_dense, speed)
+    ax_speed.set_xlabel("Dense index")
+    ax_speed.set_ylabel("||v||")
+    ax_speed.set_title("Speed along dense trajectory")
+    ax_speed.grid(True, alpha=0.3)
+
+    # =============================================================
+    # 4) Acceleration magnitude
+    # =============================================================
+    acc_mag = np.linalg.norm(acc_dense, axis=-1)
+    ax_acc.plot(t_dense, acc_mag)
+    ax_acc.set_xlabel("Dense index")
+    ax_acc.set_ylabel("||a||")
+    ax_acc.set_title("Acceleration magnitude along dense trajectory")
+    ax_acc.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
