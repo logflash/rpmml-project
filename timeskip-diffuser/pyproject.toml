@@ -3,7 +3,7 @@ requires = ["setuptools", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "rpmml_project"
+name = "timeskip_diffuser"
 version = "0.1.0"
 description = "Final project for ECE531 at Princeton."
 readme = "README.md"
@@ -18,7 +18,7 @@ dependencies = [
     "GitPython",
     "tqdm",
     "minari[hf]",
-    "minari[hfd5]"
+    "minari[hfd5]",
 ]
 
 [project.optional-dependencies]
