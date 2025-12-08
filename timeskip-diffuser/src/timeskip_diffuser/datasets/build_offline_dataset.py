@@ -34,7 +34,7 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
     def __init__(
         self,
         dataset_name="D4RL/pointmaze/umaze-v2",
-        horizon=32,
+        horizon=24,
         normalize=True,
         samples_per_trajectory=100,
         max_rejection_attempts=1000,
@@ -45,8 +45,8 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
         self.normalize_flag = normalize
 
         # Log-normal(1, 1) parameters - fixed, no hyperparameters to tune
-        self.lognormal_mu = 2.0
-        self.lognormal_sigma = 2.0
+        self.lognormal_mu = 1.0
+        self.lognormal_sigma = 1.0
 
         # Load dataset
         self.dataset = minari.load_dataset(dataset_name, download=True)
@@ -257,7 +257,7 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
 
 
 
-OUT_PATH = "offline_umaze_independent_skips_mean2_sig2.npz"
+OUT_PATH = "offline_umaze_independent_skips_h24_mean1_sig1.npz"
 SAMPLES_PER_TRAJ = 100
 HORIZON = 32
 

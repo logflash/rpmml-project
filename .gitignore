@@ -160,9 +160,18 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
-timeskip-diffuser/src/timeskip_diffuser/datasets/offline_umaze_independent_skips_mean1_sig1.npz
+
+#heavy datasets
+timeskip-diffuser/src/timeskip_diffuser/datasets/cleaned*
+timeskip-diffuser/src/timeskip_diffuser/datasets/offline*
+
+
+
+#checkpoint + logging
 timeskip-diffuser/src/timeskip_diffuser/diffuser/wandb
 timeskip-diffuser/src/timeskip_diffuser/diffuser/checkpoints
+
+
 
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
