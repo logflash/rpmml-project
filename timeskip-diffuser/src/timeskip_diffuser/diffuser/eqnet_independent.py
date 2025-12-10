@@ -642,7 +642,7 @@ class DiffuserTrainer:
 
             # Save checkpoint periodically
             if save_every > 0 and (epoch + 1) % save_every == 0:
-                checkpoint_path = f"checkpoints/diffuser_flat_eqnet_independent_cleaned_h32_m4_s2_epoch_{epoch+1}.pt"
+                checkpoint_path = f"checkpoints/diffuser_fixed_h32_m05625_s075_epoch_{epoch+1}.pt"
                 self.save_checkpoint(checkpoint_path)
                 print(f"  → Saved checkpoint to {checkpoint_path}")
 
@@ -1055,7 +1055,7 @@ if __name__ == "__main__":
     # DATA
     # ========================================================================
 
-    OFFLINE_FILE = "../datasets/cleaned_offline_umaze_independent_skips_h32_mean4_sig2.npz"
+    OFFLINE_FILE = "/scratch/network/ts4953/dataset_gen/rpmml-project/timeskip-diffuser/src/timeskip_diffuser/datasets/fixed_offline_umaze_independent_skips_h32_m05625_sig075.npz"
 
     minari_dataset = OfflineSkipDataset(
         OFFLINE_FILE,

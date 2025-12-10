@@ -1,0 +1,5 @@
+Mu, Sig for datasets after rejection sampling
+
+mu=4 sig=2 Final skip stats: 1.8983839 5.697609
+mu=1 sig=1 Final skip stats: 1.8780023 2.563767
+mu=0.5625 sig=0.75 Final skip stats: 1.5701092 1.5628206

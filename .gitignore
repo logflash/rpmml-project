@@ -164,6 +164,7 @@ cython_debug/
 #heavy datasets
 timeskip-diffuser/src/timeskip_diffuser/datasets/cleaned*
 timeskip-diffuser/src/timeskip_diffuser/datasets/offline*
+timeskip-diffuser/src/timeskip_diffuser/datasets/fixed*
 
 
 

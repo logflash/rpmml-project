@@ -13,6 +13,8 @@ import random
 from matplotlib import pyplot as plt
 
 
+
+#Changed to post-hoc skip 
 class MinariTrajectoryDatasetIndependentSkips(Dataset):
     """
     Dataset for loading state (position) and skip-value trajectory sequences from Minari
@@ -79,19 +81,27 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
         self.action_dim = 1  # skip value
         self.traj_dim = self.state_dim + self.action_dim  # 3
 
+
+        #do same thing but with skips!!!!
         if normalize:
             self.pos_mean = all_positions.mean(axis=0).astype(np.float32)
             self.pos_std = all_positions.std(axis=0).astype(np.float32) + 1e-8
+            self.skip_mean, self.skip_std = self._estimate_skip_stats()
         else:
             self.pos_mean = np.zeros(self.state_dim, dtype=np.float32)
             self.pos_std = np.ones(self.state_dim, dtype=np.float32)
+            self.skip_mean = 0.0
+            self.skip_std  = 1.0
 
         # Skip normalization statistics (computed from lognormal parameters)
         # For LogNormal(μ, σ): mean = exp(μ + σ²/2), std = sqrt((exp(σ²) - 1) * exp(2μ + σ²))
-        self.skip_mean = np.exp(self.lognormal_mu + self.lognormal_sigma**2 / 2)  # ≈ 4.48
-        variance = (np.exp(self.lognormal_sigma**2) - 1) * np.exp(2 * self.lognormal_mu + self.lognormal_sigma**2)
-        self.skip_std = np.sqrt(variance)  # ≈ 11.1
+        
+        
+        #calculate based off of actual dataset
 
+        print("self.skip_mean", self.skip_mean)
+        print("self.skip_std", self.skip_std)
+        
         # Combined mean/std over full trajectory vector [x, y, skip]
         self.mean = np.zeros(self.traj_dim, dtype=np.float32)
         self.std = np.ones(self.traj_dim, dtype=np.float32)
@@ -119,6 +129,23 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
             sigma=self.lognormal_sigma,
             size=n_skips
         ).astype(np.float32)
+        
+    def _estimate_skip_stats(self, num_windows=50_000):
+        all_skips = []
+
+        for _ in range(num_windows):
+            traj_idx = np.random.randint(len(self.trajectories))
+            positions = self.trajectories[traj_idx]
+
+            _, window_skips = self._generate_window_with_rejection(positions)
+            all_skips.append(window_skips)
+
+        all_skips = np.concatenate(all_skips, axis=0)
+
+        skip_mean = all_skips.mean().astype(np.float32)
+        skip_std  = all_skips.std().astype(np.float32) + 1e-8
+
+        return skip_mean, skip_std
 
     def _interpolate_position(self, positions, tau):
         """
@@ -256,8 +283,9 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
 
 
 
-
-OUT_PATH = "offline_umaze_independent_skips_h24_mean1_sig1.npz"
+#if name contains fixed, means it was generated after proper normalization stats were added
+#previously, we were taking theoretical limit, now its based off of actual sampled points
+OUT_PATH = "fixed_stats_offline_umaze_independent_skips_h32_mean1_sig1.npz"
 SAMPLES_PER_TRAJ = 100
 HORIZON = 32
 
