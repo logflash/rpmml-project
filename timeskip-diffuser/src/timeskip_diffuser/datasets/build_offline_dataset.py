@@ -285,9 +285,9 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
 
 #if name contains fixed, means it was generated after proper normalization stats were added
 #previously, we were taking theoretical limit, now its based off of actual sampled points
-OUT_PATH = "fixed_stats_offline_umaze_independent_skips_h32_mean1_sig1.npz"
+OUT_PATH = "fixed_stats_offline_umaze_independent_skips_h48_mean1_sig1.npz"
 SAMPLES_PER_TRAJ = 100
-HORIZON = 32
+HORIZON = 48
 
 print("Loading Minari...")
 minari_ds = MinariTrajectoryDatasetIndependentSkips(

@@ -642,7 +642,7 @@ class DiffuserTrainer:
 
             # Save checkpoint periodically
             if save_every > 0 and (epoch + 1) % save_every == 0:
-                checkpoint_path = f"checkpoints/diffuser_fixed_h32_m05625_s075_epoch_{epoch+1}.pt"
+                checkpoint_path = f"checkpoints/diffuser_massive_fixed_h32_m1_s1_epoch_{epoch+1}.pt"
                 self.save_checkpoint(checkpoint_path)
                 print(f"  → Saved checkpoint to {checkpoint_path}")
 
@@ -845,6 +845,8 @@ def expand_spline_from_skip_list(skip_list, dt=0.01):
 
         num_samples = np.ceil(k).astype(int) + 1  # +1 to include endpoint
 
+        if not np.isfinite(k) or k <= 0:
+            raise ValueError(f"Invalid skip k={k} at segment {i}")
         P, V, A = hermite_segment(p0, v0_scaled, p1, v1_scaled, num_samples)
 
         # avoid duplication at segment seam
@@ -1026,9 +1028,9 @@ if __name__ == "__main__":
     #for online benchmarking
     wandb.init(
         project="eqnet-diffuser",
-        name="independent-skips",
+        name="h48_mu1_sig1_independent-skips",
         config={
-            "horizon": 32,
+            "horizon": 48,
             "timesteps": 200,
             "lr": 1e-4,
             "dataset": "independent_skips_umaze",
@@ -1055,7 +1057,7 @@ if __name__ == "__main__":
     # DATA
     # ========================================================================
 
-    OFFLINE_FILE = "/scratch/network/ts4953/dataset_gen/rpmml-project/timeskip-diffuser/src/timeskip_diffuser/datasets/fixed_offline_umaze_independent_skips_h32_m05625_sig075.npz"
+    OFFLINE_FILE = "/scratch/network/ts4953/dataset_gen/rpmml-project/timeskip-diffuser/src/timeskip_diffuser/datasets/fixed_offline_umaze_independent_skips_massive_h32_m1_sig1.npz"
 
     minari_dataset = OfflineSkipDataset(
         OFFLINE_FILE,
