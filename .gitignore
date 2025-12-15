@@ -184,7 +184,6 @@ timeskip-diffuser/src/timeskip_diffuser/diffuser/checkpoints
 # --- LARGE NPZ / DATASETS ---
 *.npz
 *.npy
-datasets/
 data/
 offline_datasets/
 **/fixed_stats_*.npz
