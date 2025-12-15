@@ -188,7 +188,7 @@ datasets/
 data/
 offline_datasets/
 **/fixed_stats_*.npz
-
+timeskip-diffuser/src/timeskip_diffuser/datasets/groundtruth
 # --- WANDB RUN ARTIFACTS ---
 wandb/
 **/*.wandb

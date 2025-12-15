@@ -30,9 +30,9 @@ class OfflineSkipDataset(Dataset):
     from an .npz archive that also contains normalization statistics.
 
     Mirrors exactly the attributes of MinariTrajectoryDatasetIndependentSkips:
-        - state_dim = 2
+        - state_dim = 3
         - action_dim = 1
-        - traj_dim = 3
+        - traj_dim = 4
         - pos_mean, pos_std
         - flat_mean, flat_std
         - skip_mean, skip_std
@@ -46,23 +46,26 @@ class OfflineSkipDataset(Dataset):
         # Load normalized trajectory data
         # -------------------------------------------------------
         data = archive["data"]  # (N, H, 3)
-        assert data.ndim == 3 and data.shape[1] == horizon
+        
+        assert data.ndim == 3, f"expected (N,H,D), got {data.shape}"
+        assert data.shape[1] == horizon, f"horizon mismatch: {data.shape[1]} vs {horizon}"
+        assert data.shape[2] == 4, f"expected traj_dim=4, got {data.shape[2]}"
 
         self.data = torch.from_numpy(data).float()
         self.horizon = horizon
 
         # Exactly match MinariIndependent dims
-        self.state_dim = 2          # (x, y)
+        self.state_dim = 3          # (x, y, z)
         self.action_dim = 1         # skip
-        self.traj_dim = 3           # 2 + 1
+        self.traj_dim = 4           # 2 + 1
 
         # -------------------------------------------------------
         # Load same normalization fields as the on-the-fly dataset
         # -------------------------------------------------------
 
         # Position normalization
-        self.pos_mean = archive["flat_mean"].astype(np.float32)  # (2,)
-        self.pos_std  = archive["flat_std"].astype(np.float32)   # (2,)
+        self.pos_mean = archive["flat_mean"].astype(np.float32)  # (3,)
+        self.pos_std  = archive["flat_std"].astype(np.float32)   # (3,)
 
         # IMPORTANT: aliases so planner code works
         self.flat_mean = self.pos_mean
@@ -73,8 +76,8 @@ class OfflineSkipDataset(Dataset):
         self.skip_std  = float(archive["skip_std"])
 
         # Full 3-d normalization (for denorm in planner)
-        self.mean = archive["full_mean"].astype(np.float32)      # (3,)
-        self.std  = archive["full_std"].astype(np.float32)       # (3,)
+        self.mean = archive["full_mean"].astype(np.float32)      # (4,)
+        self.std  = archive["full_std"].astype(np.float32)       # (4,)
 
     def __len__(self):
         return self.data.shape[0]
@@ -97,9 +100,9 @@ class StartReachingReward:
         self.reward_scale = reward_scale
 
     def __call__(self, trajectories):
-        # trajectories: (B, T, D) where D = 3 (x, y, skip)
-        pos = trajectories[..., :2]      # use only x,y
-        initial_pos = pos[:, 0]          # (B,2)
+        # trajectories: (B, T, D) where D = 4 (x, y, z, skip)
+        pos = trajectories[..., :3]      # use only x,y, z
+        initial_pos = pos[:, 0]          # (B,3)
         start_pos = self.start_pos.to(trajectories.device)
         dist_squared = ((initial_pos - start_pos) ** 2).sum(dim=-1)
         return -dist_squared * self.reward_scale
@@ -110,7 +113,7 @@ class GoalReachingReward:
         self.reward_scale = reward_scale
 
     def __call__(self, trajectories):
-        pos = trajectories[..., :2]      # (B,T,2)
+        pos = trajectories[..., :3]      # (B,T,2)
         final_pos = pos[:, -1]
         goal_pos = self.goal_pos.to(trajectories.device)
         dist_squared = ((final_pos - goal_pos)**2).sum(dim=-1)
@@ -119,16 +122,16 @@ class GoalReachingReward:
 
 
 
-class CurvaturePenalty:
-    """A reward proportional to the sum of trajectory curvatures."""
-    def __init__(self, reward_scale=1.0):
-        self.reward_scale = reward_scale
+# class CurvaturePenalty:
+#     """A reward proportional to the sum of trajectory curvatures."""
+#     def __init__(self, reward_scale=1.0):
+#         self.reward_scale = reward_scale
 
-    def __call__(self, traj):
-        # traj: (B, T, D) where D >= 2
-        pos = traj[..., :2]  # (B, T, 2)
-        curvature = (pos[:, 2:] - 2*pos[:, 1:-1] + pos[:, :-2]).norm(dim=-1)
-        return -curvature.sum(dim=-1) * self.reward_scale
+#     def __call__(self, traj):
+#         # traj: (B, T, D) where D >= 2
+#         pos = traj[..., :3]  # (B, T, 2)
+#         curvature = (pos[:, 3:] - 2*pos[:, 1:-1] + pos[:, :-2]).norm(dim=-1)
+#         return -curvature.sum(dim=-1) * self.reward_scale
 
 class SkipTotalTimeSkipPenalty:
     """A reward proportional to the sum of step lengths (L2 norms)."""
@@ -137,7 +140,9 @@ class SkipTotalTimeSkipPenalty:
         self.reward_scale = reward_scale
 
     def __call__(self, trajectories):
-        position_diffs = trajectories[:, 1:] - trajectories[:, :-1]
+        pos = trajectories[..., :3]
+        position_diffs = pos[:, 1:] - pos[:, :-1]
+       
         step_lengths = position_diffs.norm(dim=-1)  # L2 length of each step
         path_length = step_lengths.sum(dim=-1)
         return -path_length * self.reward_scale
@@ -603,7 +608,7 @@ class DiffuserTrainer:
 
         return loss.item()
 
-    def train(self, epochs=100, save_every=10):
+    def train(self, epochs=1000, save_every=100):
         """
         Train the model with real-time progress display.
 
@@ -642,7 +647,7 @@ class DiffuserTrainer:
 
             # Save checkpoint periodically
             if save_every > 0 and (epoch + 1) % save_every == 0:
-                checkpoint_path = f"checkpoints/diffuser_flat_eqnet_independent_epoch_{epoch+1}_fixed_over.pt"
+                checkpoint_path = f"checkpoints/diffuser_flat_eqnet_independent_epoch_{epoch+1}_drone.pt"
                 self.save_checkpoint(checkpoint_path)
                 print(f"  → Saved checkpoint to {checkpoint_path}")
 
@@ -788,7 +793,8 @@ class DiffuserPlanner:
 
         pos = pos_norm * self.dataset.flat_std + self.dataset.flat_mean
         skip = skip_norm * self.dataset.skip_std + self.dataset.skip_mean
-
+        MIN_SKIP = 1e-3
+        skip = np.clip(skip, MIN_SKIP, None)
         coarse = np.zeros_like(coarse_norm)
         coarse[:, : self.dataset.state_dim] = pos
         coarse[:, self.dataset.state_dim] = skip
@@ -816,7 +822,7 @@ class DiffuserPlanner:
             vel_dense=vel_dense,           # (N,2)
             acc_dense=acc_dense,           # (N,2)
         )
-def expand_spline_from_skip_list(skip_list, dt=0.01):
+def expand_spline_from_skip_list(skip_list, dt = 0.002):
     """
     Convert skip_list → dense spline-based trajectory.
     Ensures the last sample of each segment equals the next sparse waypoint.
@@ -921,8 +927,10 @@ def estimate_sparse_velocities(skip_list, dt):
     skips = [k for (p, k) in skip_list]
 
     N = len(positions)
-    velocities = np.zeros((N, 2))
-    velocities[0] = np.zeros(2)  # first velocity: zero
+    D = positions.shape[1]
+    velocities = np.zeros((N, D))
+    velocities[0] = np.zeros(D)
+    
     for i in range(1, N - 1):
         k = skips[i]
         T = k * dt
@@ -932,92 +940,7 @@ def estimate_sparse_velocities(skip_list, dt):
 
     return positions, velocities, skips
 
-def run_sanity_check(dataset, diffusion, model, device="cpu", batch_idx=0):
-    print("\n" + "="*80)
-    print("SANITY CHECK: Dataset Normalization Consistency")
-    print("="*80)
 
-    # ----------------------------------------------------------------------------------
-    # 1. Grab a raw window from dataset the exact way __getitem__ uses it
-    # ----------------------------------------------------------------------------------
-    sample_norm = dataset[batch_idx]              # normalized window: (H, 3)
-    sample_norm_np = sample_norm.numpy()
-
-    print("\nNormalized window [x_norm, y_norm, skip_norm]:")
-    print(sample_norm_np)
-
-    # Denormalize manually (matching DiffuserPlanner logic)
-    pos_norm = sample_norm_np[:, :dataset.state_dim]
-    skip_norm = sample_norm_np[:, dataset.state_dim]
-
-    pos_denorm = pos_norm * dataset.flat_std + dataset.flat_mean
-    skip_denorm = skip_norm * dataset.skip_std + dataset.skip_mean
-
-    sample_denorm = np.zeros_like(sample_norm_np)
-    sample_denorm[:, :dataset.state_dim] = pos_denorm
-    sample_denorm[:, dataset.state_dim] = skip_denorm
-
-    print("\nReconstructed (denormalized) window:")
-    print(sample_denorm)
-
-    # Check consistency: should be nearly equal
-    print("\nError statistics (denorm(norm(x)) - x_raw):")
-    raw_positions = dataset.skip_trajectories[ dataset.indices[batch_idx][0] ]
-    start = dataset.indices[batch_idx][1]
-    raw_window = raw_positions[start:start+dataset.horizon]
-
-    raw_pos = np.array([p for (p,c,tau) in raw_window])
-    raw_skip = np.array([c for (p,c,tau) in raw_window])
-
-    # Compare
-    pos_err = np.abs(raw_pos - pos_denorm).mean()
-    skip_err = np.abs(raw_skip - skip_denorm).mean()
-
-    print(f"  mean position error: {pos_err:.8f}")
-    print(f"  mean skip error    : {skip_err:.8f}")
-
-    # ----------------------------------------------------------------------------------
-    # 2. Run a single q-sample diffusion step (just to check no shape errors)
-    # ----------------------------------------------------------------------------------
-    print("\n" + "="*80)
-    print("SANITY CHECK: Single Diffusion Step")
-    print("="*80)
-
-    model = model.to(device)
-    diffusion = diffusion.to(device)
-
-    batch = sample_norm.unsqueeze(0).to(device)   # shape (1, H, 3)
-    t = torch.tensor([ diffusion.timesteps // 2 ], dtype=torch.long, device=device)
-
-    with torch.no_grad():
-        # This simulates a single forward diffusion step
-        noise = torch.randn_like(batch)
-        xt = diffusion.q_sample(batch, t, noise)
-
-    print("\nxt (sample after one q-sample step):")
-    print(xt.cpu().numpy()[0])
-
-    print(f"\nShapes:")
-    print(f"  batch: {batch.shape}")
-    print(f"  xt   : {xt.shape}  (should be same)")
-
-    # ----------------------------------------------------------------------------------
-    # 3. Verify denorm(norm(x)) ≈ x for all dims
-    # ----------------------------------------------------------------------------------
-    print("\n" + "="*80)
-    print("FINAL CHECK: norm→denorm identity")
-    print("="*80)
-
-    recon_norm = (sample_denorm - dataset.mean) / dataset.std
-    recon_denorm = recon_norm * dataset.std + dataset.mean
-
-    err_full = np.abs(recon_denorm - sample_denorm).mean()
-    print(f"Mean reconstruction error over full (x,y,skip): {err_full:.10f}")
-
-    if err_full < 1e-5:
-        print("✓ PASSED: normalization pipeline is internally consistent.")
-    else:
-        print("⚠️ WARNING: inconsistency detected.")
 
 if __name__ == "__main__":
     
@@ -1055,7 +978,7 @@ if __name__ == "__main__":
     # DATA
     # ========================================================================
 
-    OFFLINE_FILE = "/scratch/network/dd6849/rpmml-project/fixed_stats_offline_umaze_independent_skips_h32_mean1_sig1_oversampled.npz"
+    OFFLINE_FILE = "/scratch/network/dd6849/rpmml-project/timeskip-diffuser/src/timeskip_diffuser/datasets/fixed_stats_offline_indoor45_independent_skips_h32_mu1_sig1_dt200.npz"
 
     minari_dataset = OfflineSkipDataset(
         OFFLINE_FILE,
@@ -1096,10 +1019,10 @@ if __name__ == "__main__":
         print("\n" + "=" * 80)
         print("TRAINING")
         print("=" * 80)
-        trainer.train(epochs=100, save_every=1)
+        trainer.train(epochs=1000, save_every=100)
     else:
         print("\nLoading pre-trained model...")
-        trainer.load("diffuser_flat_eqnet_independent_epoch_1000_drone.pt")
+        trainer.load("checkpoints/diffuser_flat_eqnet_epoch_100_fixed.pt")
         print("Loaded checkpoint successfully")
 
     # IMPORTANT: Switch to EMA parameters for inference (better quality!)
@@ -1115,16 +1038,16 @@ if __name__ == "__main__":
     print("=" * 80)
 
     planner = DiffuserPlanner(eqnet, gaussian_diffusion, minari_dataset, device=torch_device)
-
-    current = np.array([1.06591915, 0.39449871, 0.88507522, 4.78210334])
-    goal = np.array([0.55692841, 1.02245092])
+    # CHNAGE
+    current = np.array([-4.80, 4.3876, -0.926])
+    goal = np.array([-21.53, 9.2280, 1.016])
 
     reward_fn = CompositeReward(
         [
-            StartReachingReward(current[:2], reward_scale=5.0),
+            StartReachingReward(current[:3], reward_scale=5.0),
             GoalReachingReward(goal, reward_scale=5.0),
             SkipTotalTimeSkipPenalty(reward_scale=0.1),
-            CurvaturePenalty(reward_scale=0.1),
+
         ]
     )
 
@@ -1153,8 +1076,8 @@ if __name__ == "__main__":
     vel_dense=traj["vel_dense"]           # (N,2)
     acc_dense=traj["acc_dense"]           # (N,2)  
     print(f"Start (actual): {pos_dense[0]}")
-    print(f"Start (target): {current[:2]}")
-    print(f"Start error: {np.linalg.norm(pos_dense[0] - current[:2]):.4f}")
+    print(f"Start (target): {current[:3]}")
+    print(f"Start error: {np.linalg.norm(pos_dense[0] - current[:3]):.4f}")
     print(f"End: {pos_dense[-1]}")
     print(f"Goal: {goal}")
     print(f"Goal error: {np.linalg.norm(pos_dense[-1] - goal):.4f}")
