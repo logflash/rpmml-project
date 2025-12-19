@@ -13,7 +13,19 @@ import random
 from matplotlib import pyplot as plt
 
 
+BOTTOM_LEFT_X = (-1.5, -0.5)
+BOTTOM_LEFT_Y = (-1.5, -0.5)
+TOP_RIGHT_X   = (-1.5, -0.5)
+TOP_RIGHT_Y   = ( 0.5,  1.5 )
 
+def in_region(x, y, xr, yr):
+    return (xr[0] <= x <= xr[1]) and (yr[0] <= y <= yr[1])
+
+def is_bottom_left(p):
+    return in_region(p[0], p[1], BOTTOM_LEFT_X, BOTTOM_LEFT_Y)
+
+def is_top_right(p):
+    return in_region(p[0], p[1], TOP_RIGHT_X, TOP_RIGHT_Y)
 #Changed to post-hoc skip 
 class MinariTrajectoryDatasetIndependentSkips(Dataset):
     """
@@ -32,11 +44,11 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
       [:, 0:2] -> normalized positions (x, y)
       [:, 2]   -> normalized skip value (action)
     """
-
+    
     def __init__(
         self,
         dataset_name="D4RL/pointmaze/umaze-v2",
-        horizon=24,
+        horizon=32,
         normalize=True,
         samples_per_trajectory=100,
         max_rejection_attempts=1000,
@@ -55,6 +67,8 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
 
         # Store trajectories (just positions)
         self.trajectories = []
+        self.u_trajectories = []   # store only U-shaped episodes
+        self.non_u_trajectories = []
         all_positions = []
 
         # Process episodes
@@ -68,13 +82,26 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
 
             # Only keep trajectories long enough for at least one skip
             if len(positions) >= 2:
-                self.trajectories.append(positions)
-                all_positions.append(positions)
+                
+                start = positions[0]
+                end   = positions[-1]
 
+                is_u = is_bottom_left(start) and is_top_right(end)
+
+                if is_u:
+                    self.u_trajectories.append(positions)
+                else:
+                    self.non_u_trajectories.append(positions)
+        # Oversample U-shaped episodes
+        U_MULTIPLIER = 50
+        self.trajectories = self.non_u_trajectories + self.u_trajectories * U_MULTIPLIER
+        # Compute normalization statistics
         if len(self.trajectories) == 0:
             raise ValueError("No valid trajectories found in dataset")
 
-        # Compute normalization statistics
+        all_positions.append(positions)
+
+        
         all_positions = np.concatenate(all_positions, axis=0)
 
         self.state_dim = 2  # (x, y)
@@ -285,9 +312,9 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
 
 #if name contains fixed, means it was generated after proper normalization stats were added
 #previously, we were taking theoretical limit, now its based off of actual sampled points
-OUT_PATH = "fixed_stats_offline_umaze_independent_skips_h48_mean1_sig1.npz"
+OUT_PATH = "fixed_stats_offline_umaze_multiplied_independent_skips_h32_mean1_sig1.npz"
 SAMPLES_PER_TRAJ = 100
-HORIZON = 48
+HORIZON = 32
 
 print("Loading Minari...")
 minari_ds = MinariTrajectoryDatasetIndependentSkips(

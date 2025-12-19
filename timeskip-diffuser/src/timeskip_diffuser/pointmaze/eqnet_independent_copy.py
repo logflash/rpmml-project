@@ -642,7 +642,7 @@ class DiffuserTrainer:
 
             # Save checkpoint periodically
             if save_every > 0 and (epoch + 1) % save_every == 0:
-                checkpoint_path = f"checkpoints/diffuser_flat_eqnet_independent_epoch_{epoch+1}.pt"
+                checkpoint_path = f"checkpoints/diffuser_flat_eqnet_independent_epoch_{epoch+1}_fixed_over.pt"
                 self.save_checkpoint(checkpoint_path)
                 print(f"  → Saved checkpoint to {checkpoint_path}")
 
@@ -1055,7 +1055,7 @@ if __name__ == "__main__":
     # DATA
     # ========================================================================
 
-    OFFLINE_FILE = "../datasets/offline_umaze_independent_skips.npz"
+    OFFLINE_FILE = "/scratch/network/dd6849/rpmml-project/fixed_stats_offline_umaze_independent_skips_h32_mean1_sig1_oversampled.npz"
 
     minari_dataset = OfflineSkipDataset(
         OFFLINE_FILE,
@@ -1099,7 +1099,7 @@ if __name__ == "__main__":
         trainer.train(epochs=100, save_every=1)
     else:
         print("\nLoading pre-trained model...")
-        trainer.load("checkpoints/diffuser_flat_eqnet_epoch_100.pt")
+        trainer.load("checkpoints/diffuser_flat_eqnet_epoch_100_fixed.pt")
         print("Loaded checkpoint successfully")
 
     # IMPORTANT: Switch to EMA parameters for inference (better quality!)

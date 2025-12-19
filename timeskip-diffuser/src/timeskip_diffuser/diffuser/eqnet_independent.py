@@ -130,8 +130,10 @@ class CurvaturePenalty:
         curvature = (pos[:, 2:] - 2*pos[:, 1:-1] + pos[:, :-2]).norm(dim=-1)
         return -curvature.sum(dim=-1) * self.reward_scale
 
+
+"""
 class SkipTotalTimeSkipPenalty:
-    """A reward proportional to the sum of step lengths (L2 norms)."""
+   
 
     def __init__(self, reward_scale=1.0):
         self.reward_scale = reward_scale
@@ -141,6 +143,18 @@ class SkipTotalTimeSkipPenalty:
         step_lengths = position_diffs.norm(dim=-1)  # L2 length of each step
         path_length = step_lengths.sum(dim=-1)
         return -path_length * self.reward_scale
+"""
+
+class SkipTotalTimeSkipPenalty:
+    """Penalize total physical time (sum of skips)."""
+    def __init__(self, reward_scale=1.0):
+        self.reward_scale = reward_scale
+
+    def __call__(self, trajectories):
+        # trajectories are DENORMALIZED here
+        skips = trajectories[..., 2]      # (B, T)
+        total_time = skips.sum(dim=-1)
+        return -total_time * self.reward_scale
 
 
 class CompositeReward:
@@ -642,7 +656,7 @@ class DiffuserTrainer:
 
             # Save checkpoint periodically
             if save_every > 0 and (epoch + 1) % save_every == 0:
-                checkpoint_path = f"checkpoints/diffuser_massive_fixed_h32_m1_s1_epoch_{epoch+1}.pt"
+                checkpoint_path = f"checkpoints/diffuser_fixed_multiplied_h32_m1_s1_epoch_{epoch+1}.pt"
                 self.save_checkpoint(checkpoint_path)
                 print(f"  → Saved checkpoint to {checkpoint_path}")
 
@@ -1057,7 +1071,7 @@ if __name__ == "__main__":
     # DATA
     # ========================================================================
 
-    OFFLINE_FILE = "/scratch/network/ts4953/dataset_gen/rpmml-project/timeskip-diffuser/src/timeskip_diffuser/datasets/fixed_offline_umaze_independent_skips_massive_h32_m1_sig1.npz"
+    OFFLINE_FILE = "/scratch/network/ts4953/dataset_gen/rpmml-project/timeskip-diffuser/src/timeskip_diffuser/datasets/fixed_stats_offline_umaze_multiplied_independent_skips_h32_mean1_sig1.npz"
 
     minari_dataset = OfflineSkipDataset(
         OFFLINE_FILE,
