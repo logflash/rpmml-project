@@ -181,3 +181,34 @@ timeskip-diffuser/src/timeskip_diffuser/diffuser/checkpoints
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+# --- LARGE NPZ / DATASETS ---
+*.npz
+*.npy
+datasets/
+data/
+offline_datasets/
+**/fixed_stats_*.npz
+
+# --- WANDB RUN ARTIFACTS ---
+wandb/
+**/*.wandb
+
+# --- MODEL CHECKPOINTS / LOGS ---
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+
+# --- LARGE LOG DIRECTORIES ---
+logs/
+output/
+runs/
+
+# --- CACHE / GENERATED FILES ---
+__pycache__/
+*.pkl
+*.pickle
+*.zip
+*.tar
+*.gz
+*.h5
