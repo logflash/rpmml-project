@@ -1,0 +1,53 @@
+seed: 0
+
+# =========================
+# Environment
+# =========================
+env:
+  name: medium
+
+# =========================
+# Model
+# =========================
+model:
+  architecture: eqnet
+  skips: false
+
+# =========================
+# Paths
+# =========================
+paths:
+  work_dir: runs
+
+  dataset_script: timeskip-diffuser/src/timeskip_diffuser/datasets/build_offline_dataset.py
+  dataset_out: timeskip-diffuser/src/timeskip_diffuser/datasets/medium_h32.npz
+
+  eqnet_skips_training_entry: timeskip_diffuser.pointmaze.eqnet_independent_copy
+  eqnet_noskips_training_entry: timeskip_diffuser.pointmaze.point_maze_4
+  unet_skips_training_entry: timeskip_diffuser.pointmaze.unet_skips
+  unet_noskips_training_entry: timeskip_diffuser.pointmaze.unet_noskips
+
+# =========================
+# Dataset
+# =========================
+dataset:
+  args:
+    horizon: 32
+    samples_per_trajectory: 100
+    normalize: true
+    max_rejection_attempts: 50
+
+# =========================
+# Training
+# =========================
+train:
+  args:
+    timesteps: 200
+    lr: 1e-4
+    batch_size: 128
+    guidance_scale: 2.0
+    hidden_dim: 128
+    time_dim: 32
+    n_layers: 10
+    epochs: 100
+    save_every: 1

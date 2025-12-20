@@ -592,7 +592,7 @@ class DiffuserTrainer:
 
             # Save checkpoint periodically
             if save_every > 0 and (epoch + 1) % save_every == 0:
-                checkpoint_path = f"checkpoints/diffuser_flat_eqnet_epoch_{epoch+1}.pt"
+                checkpoint_path = f"checkpoints/eqnet_no_skip_{epoch+1}.pt"
                 self.save_checkpoint(checkpoint_path)
                 print(f"  → Saved checkpoint to {checkpoint_path}")
 
@@ -743,192 +743,64 @@ class DiffuserPlanner:
         return trajectories[best_idx], trajectories, rewards
 
 
-# ============================================================================
-# EXAMPLE USAGE
-# ============================================================================
+def run(cfg):
+    """
+    Entry point used by the verifier.
+    All training orchestration lives here.
+    """
 
-if __name__ == "__main__":
-    torch_device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Using device: {torch_device}")
+    # ------------------------
+    # 1. Read config
+    # ------------------------
+    env_name = cfg.env_name
+    horizon = cfg.dataset_args["horizon"]
 
-    # ========================================================================
-    # CONFIGURATION
-    # ========================================================================
+    lr = cfg.train_args.get("lr", 1e-4)
+    epochs = cfg.train_args.get("epochs", 100)
+    timesteps = cfg.train_args.get("timesteps", 200)
+    batch_size = cfg.train_args.get("batch_size", 128)
+    save_every = cfg.train_args.get("save_every", 10)
 
-    print("\n" + "=" * 80)
-    print("EQ-NET CONFIGURATION")
-    print("=" * 80)
-    print("Architecture: Local convolutions (no downsampling) for shift equivariance")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # ========================================================================
-    # DATA
-    # ========================================================================
-
-    minari_dataset = MinariTrajectoryDataset("D4RL/pointmaze/umaze-v2", horizon=32)
-    print(f"\nDataset size: {len(minari_dataset)} trajectory windows")
-
-    # ========================================================================
-    # MODEL
-    # ========================================================================
-
-    # Eq-Net: shift-equivariant architecture with local receptiveness
-    eqnet = EqNet(
-        state_dim=minari_dataset.state_dim,
-        hidden_dim=128,
-        time_dim=32,
-        n_layers=10,  # Deep but local
+    # ------------------------
+    # 2. Dataset
+    # ------------------------
+    dataset = MinariTrajectoryDataset(
+        dataset_name=f"D4RL/pointmaze/{env_name}-v2",
+        horizon=horizon,
     )
 
-    gaussian_diffusion = GaussianDiffusion(timesteps=200)
+    # ------------------------
+    # 3. Model + diffusion
+    # ------------------------
+    model = EqNet(
+        state_dim=dataset.state_dim,
+        hidden_dim=cfg.train_args.get("hidden_dim", 128),
+        time_dim=cfg.train_args.get("time_dim", 32),
+        n_layers=cfg.train_args.get("n_layers", 10),
+    )
 
-    print(f"\nModel parameters: {sum(p.numel() for p in eqnet.parameters()):,}")
+    diffusion = GaussianDiffusion(
+        timesteps=timesteps
+    )
 
-    # ========================================================================
-    # TRAINING
-    # ========================================================================
-
+    # ------------------------
+    # 4. Trainer
+    # ------------------------
     trainer = DiffuserTrainer(
-        eqnet,
-        gaussian_diffusion,
-        minari_dataset,
-        device=torch_device,
+        model=model,
+        diffusion=diffusion,
+        dataset=dataset,
+        device=device,
     )
 
-    # Train or load
-    TRAIN_NEW = True
-    if TRAIN_NEW:
-        print("\n" + "=" * 80)
-        print("TRAINING")
-        print("=" * 80)
-        trainer.train(epochs=100, save_every=1)
-    else:
-        print("\nLoading pre-trained model...")
-        trainer.load("checkpoints/diffuser_flat_eqnet_epoch_100.pt")
-        print("Loaded checkpoint successfully")
+    # ------------------------
+    # 5. Train
+    # ------------------------
+    trainer.train(
+        epochs=epochs,
+        save_every=save_every,
+    )
 
-    # IMPORTANT: Switch to EMA parameters for inference (better quality!)
     trainer.use_ema_for_inference()
-    print("Using EMA parameters for planning")
-
-    # ========================================================================
-    # PLANNING
-    # ========================================================================
-
-    planner = DiffuserPlanner(
-        eqnet, gaussian_diffusion, minari_dataset, device=torch_device
-    )
-
-    current = np.array([1.06591915, 0.39449871])
-    goal = np.array([0.55692841, 1.02245092])
-
-    # Create reward function
-    custom_reward_fn = CompositeReward(
-        [
-            StartReachingReward(current, reward_scale=5.0),
-            GoalReachingReward(goal, reward_scale=5.0),
-            PathLengthPenalty(reward_scale=0.1),
-        ]
-    )
-
-    print("\n" + "=" * 80)
-    print("PLANNING WITH EQ-NET")
-    print("=" * 80)
-
-    # ========================================================================
-    # EXPERIMENT 1: Effect of positional equivariance
-    # ========================================================================
-
-    print("\n--- Experiment 1: Standard Planning ---")
-    traj_plan = planner.plan(
-        current,
-        goal,
-        reward_fn=custom_reward_fn,
-        guidance_scale=2.0,
-        condition_on_start=True,
-        condition_on_goal=False,
-        conditioning_schedule="cosine",
-        conditioning_strength=0.5,
-    )
-
-    print(f"Start (actual): {traj_plan[0]}")
-    print(f"Start (target): {current}")
-    print(f"Start error: {np.linalg.norm(traj_plan[0] - current):.4f}")
-    print(f"End: {traj_plan[-1]}")
-    print(f"Goal: {goal}")
-    print(f"Goal error: {np.linalg.norm(traj_plan[-1] - goal):.4f}")
-
-    # Check for discontinuities
-    diffs = np.linalg.norm(traj_plan[1:] - traj_plan[:-1], axis=1)
-    max_jump = diffs.max()
-    mean_step = diffs.mean()
-    print(f"Max step size: {max_jump:.4f}")
-    print(f"Mean step size: {mean_step:.4f}")
-    if max_jump > 0.3:
-        print("  ⚠️  WARNING: Large discontinuity detected!")
-    else:
-        print("  ✓ Trajectory appears continuous")
-
-    # ========================================================================
-    # EXPERIMENT 2: Diverse sampling (paper shows this can beat replanning)
-    # ========================================================================
-
-    print("\n--- Experiment 2: Diverse Sampling (10 samples) ---")
-    best_traj, all_trajs, all_rewards = planner.plan_with_diversity(
-        current,
-        goal,
-        num_samples=10,
-        reward_fn=custom_reward_fn,
-        guidance_scale=2.0,
-        condition_on_start=True,
-        conditioning_schedule="cosine",
-        conditioning_strength=0.5,
-    )
-
-    print(f"Best trajectory reward: {max(all_rewards):.4f}")
-    print(f"Worst trajectory reward: {min(all_rewards):.4f}")
-    print(f"Mean reward: {np.mean(all_rewards):.4f}")
-    print("\nBest trajectory:")
-    print(f"  Start error: {np.linalg.norm(best_traj[0] - current):.4f}")
-    print(f"  Goal error: {np.linalg.norm(best_traj[-1] - goal):.4f}")
-
-    # Check continuity
-    diffs = np.linalg.norm(best_traj[1:] - best_traj[:-1], axis=1)
-    print(f"  Max step size: {diffs.max():.4f}")
-    print(f"  Mean step size: {diffs.mean():.4f}")
-
-    # ========================================================================
-    # EXPERIMENT 3: Effect of conditioning strength
-    # ========================================================================
-
-    print("\n--- Experiment 3: Conditioning Strength Comparison ---")
-    for strength in [0.0, 0.3, 0.5, 0.7, 1.0]:
-        traj_plan = planner.plan(
-            current,
-            goal,
-            reward_fn=custom_reward_fn,
-            guidance_scale=2.0,
-            condition_on_start=True,
-            conditioning_schedule="cosine",
-            conditioning_strength=strength,
-        )
-
-        start_err = np.linalg.norm(traj_plan[0] - current)
-        goal_err = np.linalg.norm(traj_plan[-1] - goal)
-        diffs = np.linalg.norm(traj_plan[1:] - traj_plan[:-1], axis=1)
-        max_jump = diffs.max()
-
-        print(
-            f"\nStrength {strength:.1f}: start_err={start_err:.4f}, "
-            f"goal_err={goal_err:.4f}, max_jump={max_jump:.4f}"
-        )
-        if max_jump > 0.3:
-            print("  ⚠️  Physics violation")
-
-    print("\n" + "=" * 80)
-    print("EXPERIMENTS COMPLETE")
-    print("=" * 80)
-    print("\nKey takeaways from the paper:")
-    print("1. Local receptiveness + shift equivariance enable trajectory stitching")
-    print("2. Diverse sampling can be as effective as replanning (but faster)")
-    print("3. Soft conditioning respects learned physics better than hard constraints")
-    print("4. Positional augmentation helps without architectural changes")

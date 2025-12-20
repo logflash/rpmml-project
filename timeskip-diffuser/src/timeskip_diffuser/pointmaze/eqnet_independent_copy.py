@@ -604,11 +604,11 @@ class DiffuserTrainer:
         if self.ema is not None:
             self.ema.update(self.model)
 
-        # --- W&B LOGGING ---
-        wandb.log(
-            {"train/loss": loss.item(), "train/lr": self.scheduler.get_last_lr()[0]},
-            commit=True
-        )
+        # # --- W&B LOGGING ---
+        # wandb.log(
+        #     {"train/loss": loss.item(), "train/lr": self.scheduler.get_last_lr()[0]},
+        #     commit=True
+        # )
 
         return loss.item()
 
@@ -651,7 +651,7 @@ class DiffuserTrainer:
 
             # Save checkpoint periodically
             if save_every > 0 and (epoch + 1) % save_every == 0:
-                checkpoint_path = f"checkpoints/diffuser_flat_eqnet_independent_epoch_{epoch+1}_fixed_over.pt"
+                checkpoint_path = f"checkpoints/eqnet_skips{epoch+1}.pt"
                 self.save_checkpoint(checkpoint_path)
                 print(f"  → Saved checkpoint to {checkpoint_path}")
 
@@ -941,298 +941,67 @@ def estimate_sparse_velocities(skip_list, dt):
 
     return positions, velocities, skips
 
-def run_sanity_check(dataset, diffusion, model, device="cpu", batch_idx=0):
-    print("\n" + "="*80)
-    print("SANITY CHECK: Dataset Normalization Consistency")
-    print("="*80)
+# eqnet_skips.py
 
-    # ----------------------------------------------------------------------------------
-    # 1. Grab a raw window from dataset the exact way __getitem__ uses it
-    # ----------------------------------------------------------------------------------
-    sample_norm = dataset[batch_idx]              # normalized window: (H, 3)
-    sample_norm_np = sample_norm.numpy()
+# all your existing imports
+# all your existing classes
+# all your existing helper functions
 
-    print("\nNormalized window [x_norm, y_norm, skip_norm]:")
-    print(sample_norm_np)
+def run(cfg):
+    """
+    THIS is where all the actual training happens.
+    """
 
-    # Denormalize manually (matching DiffuserPlanner logic)
-    pos_norm = sample_norm_np[:, :dataset.state_dim]
-    skip_norm = sample_norm_np[:, dataset.state_dim]
+    # ------------------------
+    # 1. Read values from cfg
+    # ------------------------
+    horizon = cfg.dataset_args["horizon"]
+    lr = cfg.train_args["lr"]
+    epochs = cfg.train_args["epochs"]
+    dataset_path = cfg.train_args["dataset_path"]
 
-    pos_denorm = pos_norm * dataset.flat_std + dataset.flat_mean
-    skip_denorm = skip_norm * dataset.skip_std + dataset.skip_mean
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    sample_denorm = np.zeros_like(sample_norm_np)
-    sample_denorm[:, :dataset.state_dim] = pos_denorm
-    sample_denorm[:, dataset.state_dim] = skip_denorm
-
-    print("\nReconstructed (denormalized) window:")
-    print(sample_denorm)
-
-    # Check consistency: should be nearly equal
-    print("\nError statistics (denorm(norm(x)) - x_raw):")
-    raw_positions = dataset.skip_trajectories[ dataset.indices[batch_idx][0] ]
-    start = dataset.indices[batch_idx][1]
-    raw_window = raw_positions[start:start+dataset.horizon]
-
-    raw_pos = np.array([p for (p,c,tau) in raw_window])
-    raw_skip = np.array([c for (p,c,tau) in raw_window])
-
-    # Compare
-    pos_err = np.abs(raw_pos - pos_denorm).mean()
-    skip_err = np.abs(raw_skip - skip_denorm).mean()
-
-    print(f"  mean position error: {pos_err:.8f}")
-    print(f"  mean skip error    : {skip_err:.8f}")
-
-    # ----------------------------------------------------------------------------------
-    # 2. Run a single q-sample diffusion step (just to check no shape errors)
-    # ----------------------------------------------------------------------------------
-    print("\n" + "="*80)
-    print("SANITY CHECK: Single Diffusion Step")
-    print("="*80)
-
-    model = model.to(device)
-    diffusion = diffusion.to(device)
-
-    batch = sample_norm.unsqueeze(0).to(device)   # shape (1, H, 3)
-    t = torch.tensor([ diffusion.timesteps // 2 ], dtype=torch.long, device=device)
-
-    with torch.no_grad():
-        # This simulates a single forward diffusion step
-        noise = torch.randn_like(batch)
-        xt = diffusion.q_sample(batch, t, noise)
-
-    print("\nxt (sample after one q-sample step):")
-    print(xt.cpu().numpy()[0])
-
-    print(f"\nShapes:")
-    print(f"  batch: {batch.shape}")
-    print(f"  xt   : {xt.shape}  (should be same)")
-
-    # ----------------------------------------------------------------------------------
-    # 3. Verify denorm(norm(x)) ≈ x for all dims
-    # ----------------------------------------------------------------------------------
-    print("\n" + "="*80)
-    print("FINAL CHECK: norm→denorm identity")
-    print("="*80)
-
-    recon_norm = (sample_denorm - dataset.mean) / dataset.std
-    recon_denorm = recon_norm * dataset.std + dataset.mean
-
-    err_full = np.abs(recon_denorm - sample_denorm).mean()
-    print(f"Mean reconstruction error over full (x,y,skip): {err_full:.10f}")
-
-    if err_full < 1e-5:
-        print("✓ PASSED: normalization pipeline is internally consistent.")
-    else:
-        print("⚠️ WARNING: inconsistency detected.")
-
-if __name__ == "__main__":
-    
-    
-    
-    #for online benchmarking
-    wandb.init(
-        project="eqnet-diffuser",
-        name="independent-skips",
-        config={
-            "horizon": 32,
-            "timesteps": 200,
-            "lr": 1e-4,
-            "dataset": "independent_skips_umaze",
-            "model": "EqNet",
-            "hidden_dim": 128,
-            "time_dim": 32,
-            "n_layers": 10,
-            "guidance_scale": 2.0,
-        }
-    )
-    torch_device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Using device: {torch_device}")
-
-    # ========================================================================
-    # CONFIGURATION
-    # ========================================================================
-
-    print("\n" + "=" * 80)
-    print("EQ-NET CONFIGURATION")
-    print("=" * 80)
-    print("Architecture: Local convolutions (no downsampling) for shift equivariance")
-
-    # ========================================================================
-    # DATA
-    # ========================================================================
-
-    OFFLINE_FILE = "/scratch/network/dd6849/rpmml-project/fixed_stats_offline_umaze_independent_skips_h32_mean1_sig1_oversampled.npz"
-
-    minari_dataset = OfflineSkipDataset(
-        OFFLINE_FILE,
-        horizon=32
-    )
-    print(f"Loaded offline dataset: {len(minari_dataset)} samples.")
-
-    # ========================================================================
-    # MODEL
-    # ========================================================================
-
-    # Eq-Net: shift-equivariant architecture with local receptiveness
-    eqnet = EqNet(
-        state_dim=minari_dataset.traj_dim,
-        hidden_dim=128,
-        time_dim=32,
-        n_layers=10,  # Deep but local
+    # ------------------------
+    # 2. Dataset (your code)
+    # ------------------------
+    dataset = OfflineSkipDataset(
+        dataset_path,
+        horizon=horizon,
     )
 
-    gaussian_diffusion = GaussianDiffusion(timesteps=200)
+    # ------------------------
+    # 3. Model 
+    # ------------------------
+    model = EqNet(
+        state_dim=dataset.traj_dim,
+        hidden_dim=cfg.train_args["hidden_dim"],
+        time_dim=cfg.train_args["time_dim"],
+        n_layers=cfg.train_args["n_layers"],
+    )
 
-    print(f"\nModel parameters: {sum(p.numel() for p in eqnet.parameters()):,}")
+    diffusion = GaussianDiffusion(
+        timesteps=cfg.train_args["timesteps"]
+    )
 
-    # ========================================================================
-    # TRAINING
-    # ========================================================================
-
+    # ------------------------
+    # 4. Trainer
+    # ------------------------
     trainer = DiffuserTrainer(
-        eqnet,
-        gaussian_diffusion,
-        minari_dataset,
-        device=torch_device,
+        model,
+        diffusion,
+        dataset,
+        device=device,
     )
 
-    # Train or load
-    TRAIN_NEW = True
-    if TRAIN_NEW:
-        print("\n" + "=" * 80)
-        print("TRAINING")
-        print("=" * 80)
-        trainer.train(epochs=100, save_every=1)
-    else:
-        print("\nLoading pre-trained model...")
-        trainer.load("checkpoints/diffuser_flat_eqnet_epoch_100_fixed.pt")
-        print("Loaded checkpoint successfully")
+    
 
-    # IMPORTANT: Switch to EMA parameters for inference (better quality!)
+    # ------------------------
+    # 5. ACTUAL TRAINING
+    # ------------------------
+    trainer.train(
+        epochs=epochs,
+        save_every=cfg.train_args["save_every"],
+    )
+
     trainer.use_ema_for_inference()
-    print("Using EMA parameters for planning")
-
-    # ========================================================================
-    # PLANNING
-    # ========================================================================
-
-    print("\n" + "=" * 80)
-    print("PLANNING WITH EQ-NET")
-    print("=" * 80)
-
-    planner = DiffuserPlanner(eqnet, gaussian_diffusion, minari_dataset, device=torch_device)
-
-    current = np.array([1.06591915, 0.39449871, 0.88507522, 4.78210334])
-    goal = np.array([0.55692841, 1.02245092])
-
-    reward_fn = CompositeReward(
-        [
-            StartReachingReward(current[:2], reward_scale=5.0),
-            GoalReachingReward(goal, reward_scale=5.0),
-            SkipTotalTimeSkipPenalty(reward_scale=0.1),
-            CurvaturePenalty(reward_scale=0.1),
-        ]
-    )
-
-    print("\n" + "=" * 80)
-    print("PLANNING WITH EQ-NET (pos + skip)")
-    print("=" * 80)
-
-    # Experiment 1: standard planning
-    print("\n--- Experiment 1: Standard Planning ---")
-    traj = planner.plan_and_reconstruct(
-        current,
-        goal,
-        reward_fn=reward_fn,
-        guidance_scale=2.0,
-        condition_on_start=True,
-        condition_on_goal=False,
-        conditioning_schedule="cosine",
-        conditioning_strength=0.5,
-        spline_func=expand_spline_from_skip_list,
-    )
-    coarse, = traj["coarse"],
-    coarse_pos= traj["coarse_pos"] 
-    coarse_skip=traj["coarse_skip"]              # (H,)
-    skip = traj["skip_list"]     # [(pos_i, skip_i)]
-    pos_dense=traj["pos_dense"]           # (N,2)
-    vel_dense=traj["vel_dense"]           # (N,2)
-    acc_dense=traj["acc_dense"]           # (N,2)  
-    print(f"Start (actual): {pos_dense[0]}")
-    print(f"Start (target): {current[:2]}")
-    print(f"Start error: {np.linalg.norm(pos_dense[0] - current[:2]):.4f}")
-    print(f"End: {pos_dense[-1]}")
-    print(f"Goal: {goal}")
-    print(f"Goal error: {np.linalg.norm(pos_dense[-1] - goal):.4f}")
-    print("\n" + "=" * 80)
-    print("EXPERIMENTS COMPLETE")
-    print("=" * 80)
-
-    # these are problems for later
-    # # ========================================================================
-    # # EXPERIMENT 2: Diverse sampling (paper shows this can beat replanning)
-    # # ========================================================================
-
-    # print("\n--- Experiment 2: Diverse Sampling (10 samples) ---")
-    # best_traj, all_trajs, all_rewards = planner.plan_with_diversity(
-    #     current,
-    #     goal,
-    #     num_samples=10,
-    #     reward_fn=custom_reward_fn,
-    #     guidance_scale=2.0,
-    #     condition_on_start=True,
-    #     conditioning_schedule="cosine",
-    #     conditioning_strength=0.5,
-    # )
-
-    # print(f"Best trajectory reward: {max(all_rewards):.4f}")
-    # print(f"Worst trajectory reward: {min(all_rewards):.4f}")
-    # print(f"Mean reward: {np.mean(all_rewards):.4f}")
-    # print("\nBest trajectory:")
-    # print(f"  Start error: {np.linalg.norm(best_traj[0] - current):.4f}")
-    # print(f"  Goal error: {np.linalg.norm(best_traj[-1] - goal):.4f}")
-
-    # # Check continuity
-    # diffs = np.linalg.norm(best_traj[1:] - best_traj[:-1], axis=1)
-    # print(f"  Max step size: {diffs.max():.4f}")
-    # print(f"  Mean step size: {diffs.mean():.4f}")
-
-    # # ========================================================================
-    # # EXPERIMENT 3: Effect of conditioning strength
-    # # ========================================================================
-
-    # print("\n--- Experiment 3: Conditioning Strength Comparison ---")
-    # for strength in [0.0, 0.3, 0.5, 0.7, 1.0]:
-    #     traj_plan = planner.plan(
-    #         current,
-    #         goal,
-    #         reward_fn=custom_reward_fn,
-    #         guidance_scale=2.0,
-    #         condition_on_start=True,
-    #         conditioning_schedule="cosine",
-    #         conditioning_strength=strength,
-    #     )
-
-    #     start_err = np.linalg.norm(traj_plan[0] - current)
-    #     goal_err = np.linalg.norm(traj_plan[-1] - goal)
-    #     diffs = np.linalg.norm(traj_plan[1:] - traj_plan[:-1], axis=1)
-    #     max_jump = diffs.max()
-
-    #     print(
-    #         f"\nStrength {strength:.1f}: start_err={start_err:.4f}, "
-    #         f"goal_err={goal_err:.4f}, max_jump={max_jump:.4f}"
-    #     )
-    #     if max_jump > 0.3:
-    #         print("  ⚠️  Physics violation")
-
-    print("\n" + "=" * 80)
-    print("EXPERIMENTS COMPLETE")
-    print("=" * 80)
-    print("\nKey takeaways from the paper:")
-    print("1. Local receptiveness + shift equivariance enable trajectory stitching")
-    print("2. Diverse sampling can be as effective as replanning (but faster)")
-    print("3. Soft conditioning respects learned physics better than hard constraints")
-    print("4. Positional augmentation helps without architectural changes")

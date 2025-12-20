@@ -11,21 +11,8 @@ from matplotlib.patches import Rectangle
 import mujoco
 import random
 from matplotlib import pyplot as plt
+import argparse
 
-
-BOTTOM_LEFT_X = (-1.5, -0.5)
-BOTTOM_LEFT_Y = (-1.5, -0.5)
-TOP_RIGHT_X   = (-1.5, -0.5)
-TOP_RIGHT_Y   = ( 0.5,  1.5 )
-
-def in_region(x, y, xr, yr):
-    return (xr[0] <= x <= xr[1]) and (yr[0] <= y <= yr[1])
-
-def is_bottom_left(p):
-    return in_region(p[0], p[1], BOTTOM_LEFT_X, BOTTOM_LEFT_Y)
-
-def is_top_right(p):
-    return in_region(p[0], p[1], TOP_RIGHT_X, TOP_RIGHT_Y)
 #Changed to post-hoc skip 
 class MinariTrajectoryDatasetIndependentSkips(Dataset):
     """
@@ -44,11 +31,11 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
       [:, 0:2] -> normalized positions (x, y)
       [:, 2]   -> normalized skip value (action)
     """
-    
+
     def __init__(
         self,
         dataset_name="D4RL/pointmaze/umaze-v2",
-        horizon=32,
+        horizon=24,
         normalize=True,
         samples_per_trajectory=100,
         max_rejection_attempts=1000,
@@ -67,8 +54,6 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
 
         # Store trajectories (just positions)
         self.trajectories = []
-        self.u_trajectories = []   # store only U-shaped episodes
-        self.non_u_trajectories = []
         all_positions = []
 
         # Process episodes
@@ -82,26 +67,13 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
 
             # Only keep trajectories long enough for at least one skip
             if len(positions) >= 2:
-                
-                start = positions[0]
-                end   = positions[-1]
+                self.trajectories.append(positions)
+                all_positions.append(positions)
 
-                is_u = is_bottom_left(start) and is_top_right(end)
-
-                if is_u:
-                    self.u_trajectories.append(positions)
-                else:
-                    self.non_u_trajectories.append(positions)
-        # Oversample U-shaped episodes
-        U_MULTIPLIER = 50
-        self.trajectories = self.non_u_trajectories + self.u_trajectories * U_MULTIPLIER
-        # Compute normalization statistics
         if len(self.trajectories) == 0:
             raise ValueError("No valid trajectories found in dataset")
 
-        all_positions.append(positions)
-
-        
+        # Compute normalization statistics
         all_positions = np.concatenate(all_positions, axis=0)
 
         self.state_dim = 2  # (x, y)
@@ -143,6 +115,7 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
         for traj_idx in range(len(self.trajectories)):
             for _ in range(self.samples_per_trajectory):
                 self.indices.append(traj_idx)
+
 
     def _sample_skips_parallel(self, n_skips):
         """
@@ -308,44 +281,111 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
 
         return torch.FloatTensor(trajectory)
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Build offline skip-based trajectory dataset from Minari"
+    )
+
+    # -------------------------
+    # Dataset source
+    # -------------------------
+    parser.add_argument(
+        "--dataset-id",
+        type=str,
+        default="D4RL/pointmaze/umaze-v2",
+        help="Minari dataset id (e.g. umaze, medium, open)",
+    )
+    parser.add_argument(
+    "--seed",
+    type=int,
+    default=0,
+    help="Random seed for dataset generation",
+    )
+    # -------------------------
+    # Sampling parameters
+    # -------------------------
+    parser.add_argument(
+        "--horizon",
+        type=int,
+        default=32,
+        help="Trajectory horizon H",
+    )
+
+    parser.add_argument(
+        "--samples-per-trajectory",
+        type=int,
+        default=100,
+        help="Number of windows sampled per trajectory",
+    )
+
+    parser.add_argument(
+        "--max-rejection-attempts",
+        type=int,
+        default=50,
+        help="Max rejection sampling attempts per window",
+    )
+
+    # -------------------------
+    # Normalization
+    # -------------------------
+    parser.add_argument(
+        "--normalize",
+        action="store_true",
+        help="Apply normalization using dataset statistics",
+    )
+
+    # -------------------------
+    # Output
+    # -------------------------
+    parser.add_argument(
+        "--out",
+        type=str,
+        required=True,
+        help="Output .npz path",
+    )
+
+    return parser.parse_args()
+
+def main():
+    
+    args = parse_args()
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    print("Loading Minari...")
+    minari_ds = MinariTrajectoryDatasetIndependentSkips(
+        args.dataset_id,
+        horizon=args.horizon,
+        normalize=args.normalize,
+        samples_per_trajectory=args.samples_per_trajectory,
+        max_rejection_attempts=args.max_rejection_attempts,
+    )
+
+    all_samples = []
+
+    print("Generating offline samples...")
+    for i in tqdm(range(len(minari_ds))):
+        sample = minari_ds[i].numpy()   # convert Tensor → numpy
+        all_samples.append(sample)
+
+    # Stack into big array: (N, H, 3)
+    dataset_array = np.stack(all_samples, axis=0)
+
+    # Save as .npy
+    np.savez(
+        args.out,
+        data=dataset_array,
+        flat_mean=minari_ds.pos_mean,
+        flat_std=minari_ds.pos_std,
+        skip_mean=minari_ds.skip_mean,
+        skip_std=minari_ds.skip_std,
+        full_mean=minari_ds.mean,
+        full_std=minari_ds.std,
+    )
+
+    print("Saved offline dataset to:", args.out)
+    print("Final size:", dataset_array.shape)
 
 
-#if name contains fixed, means it was generated after proper normalization stats were added
-#previously, we were taking theoretical limit, now its based off of actual sampled points
-OUT_PATH = "fixed_stats_offline_umaze_multiplied_independent_skips_h32_mean1_sig1.npz"
-SAMPLES_PER_TRAJ = 100
-HORIZON = 32
-
-print("Loading Minari...")
-minari_ds = MinariTrajectoryDatasetIndependentSkips(
-    "D4RL/pointmaze/umaze-v2",
-    horizon=HORIZON,
-    normalize=True,
-    samples_per_trajectory=SAMPLES_PER_TRAJ,
-    max_rejection_attempts=50,
-)
-
-all_samples = []
-
-print("Generating offline samples...")
-for i in tqdm(range(len(minari_ds))):
-    sample = minari_ds[i].numpy()   # convert Tensor → numpy
-    all_samples.append(sample)
-
-# Stack into big array: (N, H, 3)
-dataset_array = np.stack(all_samples, axis=0)
-
-# Save as .npy
-np.savez(
-    OUT_PATH,
-    data=dataset_array,
-    flat_mean=minari_ds.pos_mean,
-    flat_std=minari_ds.pos_std,
-    skip_mean=minari_ds.skip_mean,
-    skip_std=minari_ds.skip_std,
-    full_mean=minari_ds.mean,
-    full_std=minari_ds.std,
-)
-
-print("Saved offline dataset to:", OUT_PATH)
-print("Final size:", dataset_array.shape)
+if __name__ == "__main__":
+    main()
