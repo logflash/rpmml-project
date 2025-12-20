@@ -1,5 +1,5 @@
 """
-Datasets from the U-Maze environment in Minari.
+Flattened (position-only) dataset from the U-Maze v2 environment in Minari.
 """
 
 import gymnasium as gym
