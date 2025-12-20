@@ -1,0 +1,29 @@
+training:
+  hidden_dim: 128
+  time_dim: 32
+  n_layers: 10
+  epochs: 100
+  save_every: 10 #save every x epochs
+  device: "cuda"
+  diffusion_timesteps: 200
+  ema_beta: 0.999
+  batch_size: 128
+  lr: 1e-4 #optimizer
+  weight_decay: 1e-4 #optimizer
+  T_max: 100 #scheduler 
+  eta_min: 1e-6 #scheduler
+
+testing:
+  guidance_scale: 1.0
+  condition_on_start: True
+  condition_on_goal: False
+  conditioning_schedule: "constant"
+  conditioning_strength: 0.5
+
+reward:
+  startReaching_scale: 5.0
+  goalReaching_scale: 5.0
+  skipTotalTimeSkip: 0.1
+  curvaturePenalty: 0.05
+  #LogSkipReward: 0.01 -> my new one for encouraging longer skips, idk if it'll make it into paper
+  

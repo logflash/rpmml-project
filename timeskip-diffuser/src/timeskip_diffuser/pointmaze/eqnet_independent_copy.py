@@ -825,6 +825,7 @@ class DiffuserPlanner:
             vel_dense=vel_dense,           # (N,2)
             acc_dense=acc_dense,           # (N,2)
         )
+        
 def expand_spline_from_skip_list(skip_list, dt=0.01):
     """
     Convert skip_list → dense spline-based trajectory.
