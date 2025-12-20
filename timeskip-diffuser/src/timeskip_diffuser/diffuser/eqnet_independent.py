@@ -129,6 +129,16 @@ class CurvaturePenalty:
         pos = traj[..., :2]  # (B, T, 2)
         curvature = (pos[:, 2:] - 2*pos[:, 1:-1] + pos[:, :-2]).norm(dim=-1)
         return -curvature.sum(dim=-1) * self.reward_scale
+    
+class LogSkipReward:
+    def __init__(self, reward_scale=1.0, eps=1e-4):
+        self.weight = weight
+        self.eps = eps
+
+    def __call__(self, traj):
+        skips = traj[..., 2]
+        log_skip = torch.log(torch.clamp(skips, min=self.eps))
+        return log_skip.sum(dim=-1) * self.weight
 
 
 """

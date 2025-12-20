@@ -22,6 +22,15 @@ import random
 from matplotlib import pyplot as plt
 import wandb
 
+class LogSkipReward:
+    def __init__(self, reward_scale=1.0, eps=1e-4):
+        self.weight = reward_scale
+        self.eps = eps
+
+    def __call__(self, traj):
+        skips = traj[..., 2]
+        log_skip = torch.log(torch.clamp(skips, min=self.eps))
+        return log_skip.sum(dim=-1) * self.weight
 
 
 class OfflineSkipDataset(Dataset):
