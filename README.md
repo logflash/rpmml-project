@@ -11,7 +11,7 @@ cd rpmml-project
 pip install uv --target ..
 uv venv --python=3.10
 source .venv/bin/activate
-uv run --no-cache python scripts/install_all.py
+uv run --no-cache python setup/install_all.py
 # if disk quota exceeded, run `pip cache purge` or `uv clean`
 
 # Mujoco + .bashrc setup
