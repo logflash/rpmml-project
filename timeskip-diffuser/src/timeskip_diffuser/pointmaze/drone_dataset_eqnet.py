@@ -134,18 +134,15 @@ class GoalReachingReward:
 #         return -curvature.sum(dim=-1) * self.reward_scale
 
 class SkipTotalTimeSkipPenalty:
-    """A reward proportional to the sum of step lengths (L2 norms)."""
-
+    """Penalize total physical time (sum of skips)."""
     def __init__(self, reward_scale=1.0):
         self.reward_scale = reward_scale
 
     def __call__(self, trajectories):
-        pos = trajectories[..., :3]
-        position_diffs = pos[:, 1:] - pos[:, :-1]
-       
-        step_lengths = position_diffs.norm(dim=-1)  # L2 length of each step
-        path_length = step_lengths.sum(dim=-1)
-        return -path_length * self.reward_scale
+        # trajectories are DENORMALIZED here
+        skips = trajectories[..., 3]      # (B, T)
+        total_time = skips.sum(dim=-1)
+        return -total_time * self.reward_scale
 
 
 class CompositeReward:
@@ -647,7 +644,7 @@ class DiffuserTrainer:
 
             # Save checkpoint periodically
             if save_every > 0 and (epoch + 1) % save_every == 0:
-                checkpoint_path = f"checkpoints/diffuser_flat_eqnet_independent_epoch_{epoch+1}_drone.pt"
+                checkpoint_path = f"checkpoints/diffuser_flat_eqnet_independent_epoch_{epoch+1}_drone_256.pt"
                 self.save_checkpoint(checkpoint_path)
                 print(f"  → Saved checkpoint to {checkpoint_path}")
 
@@ -951,7 +948,7 @@ if __name__ == "__main__":
         project="eqnet-diffuser",
         name="independent-skips",
         config={
-            "horizon": 32,
+            "horizon": 256,
             "timesteps": 200,
             "lr": 1e-4,
             "dataset": "independent_skips_umaze",
@@ -978,11 +975,11 @@ if __name__ == "__main__":
     # DATA
     # ========================================================================
 
-    OFFLINE_FILE = "/scratch/network/dd6849/rpmml-project/timeskip-diffuser/src/timeskip_diffuser/datasets/fixed_stats_offline_indoor45_independent_skips_h32_mu1_sig1_dt200.npz"
+    OFFLINE_FILE = "/scratch/network/dd6849/rpmml-project/timeskip-diffuser/src/timeskip_diffuser/datasets/fixed_stats_offline_indoor45_independent_skips_h256_mu1_sig1_dt200.npz"
 
     minari_dataset = OfflineSkipDataset(
         OFFLINE_FILE,
-        horizon=32
+        horizon=256
     )
     print(f"Loaded offline dataset: {len(minari_dataset)} samples.")
 
@@ -1060,6 +1057,7 @@ if __name__ == "__main__":
     traj = planner.plan_and_reconstruct(
         current,
         goal,
+        horizon = 256,
         reward_fn=reward_fn,
         guidance_scale=2.0,
         condition_on_start=True,

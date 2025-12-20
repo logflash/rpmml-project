@@ -284,9 +284,9 @@ if __name__ == "__main__":
     TXT_DIR = "/scratch/network/dd6849/rpmml-project/timeskip-diffuser/src/timeskip_diffuser/datasets/groundtruth"  
     FILE_GLOB = "indoor_45*.txt"
 
-    OUT_PATH = "fixed_stats_offline_indoor45_independent_skips_h32_mu1_sig1_dt200.npz"
+    OUT_PATH = "fixed_stats_offline_indoor45_independent_skips_h256_mu1_sig1_dt200.npz"
 
-    HORIZON = 32
+    HORIZON = 256
     SAMPLES_PER_TRAJ = 100
     MAX_REJECTION_ATTEMPTS = 50
     ESTIMATE_SKIP_WINDOWS = 20_000   
