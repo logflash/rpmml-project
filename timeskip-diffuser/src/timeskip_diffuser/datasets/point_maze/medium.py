@@ -69,15 +69,16 @@ class MediumFlatDataset(Dataset):
         model = env.model  # type: ignore
 
         # Create figure
-        _, ax = plt.subplots(figsize=(4, 4))
+        _, ax = plt.subplots(figsize=(6, 6))
 
         # Plot the trajectory
         ax.scatter(
             flat_traj[:, 0],
             flat_traj[:, 1],
-            s=1,
+            s=30,
             c="#0088ff",
-            zorder=3,
+            edgecolors="k",
+            zorder=4,
         )
 
         # Mark start and end points

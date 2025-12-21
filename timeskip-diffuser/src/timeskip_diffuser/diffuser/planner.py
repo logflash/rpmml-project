@@ -227,8 +227,12 @@ def expand_spline_from_skip_list(skip_list, dt=0.01):
 
         if not np.isfinite(k) or k <= 0:
             k = 0
+<<<<<<< HEAD
             #Don't raise error anymore
             #raise ValueError(f"Invalid skip k={k} at segment {i}")
+=======
+            # raise ValueError(f"Invalid skip k={k} at segment {i}")
+>>>>>>> 4100454db4ac7186c0ef387f5eecb64f0afd63a2
         P, V, A = hermite_segment(p0, v0_scaled, p1, v1_scaled, num_samples)
 
         # avoid duplication at segment seam

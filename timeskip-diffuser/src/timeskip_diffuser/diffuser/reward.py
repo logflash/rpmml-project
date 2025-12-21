@@ -96,7 +96,7 @@ class LogSkipReward(DiffReward):
         return log_skip.sum(dim=-1) * self.reward_scale
 
 
-class SkipTotalTimeSkipPenalty(DiffReward):
+class TotalTimeSkipPenalty(DiffReward):
     """Penalty based on total physical time elapsed (sum of all timeskips)."""
 
     def __call__(self, trajectories):

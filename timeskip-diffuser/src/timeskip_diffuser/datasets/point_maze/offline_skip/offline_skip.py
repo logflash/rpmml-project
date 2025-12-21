@@ -20,6 +20,13 @@ class OfflineSkipDataset:
     def __init__(self, file_path, dataset_id="D4RL/pointmaze/umaze-v2", horizon=32):
         archive = np.load(file_path)
 
+        if "medium" in dataset_id:
+            self.axis_min = -4
+            self.axis_max = 4
+        else:
+            self.axis_min = -2.5
+            self.axis_max = 2.5
+
         self.dataset_id = dataset_id
         self.env_dataset = minari.load_dataset(dataset_id, download=True)
         self.wall_rects = extract_wall_rects(dataset_id)
@@ -156,8 +163,8 @@ class OfflineSkipDataset:
         ax.legend(loc="upper right", fontsize=10)
         ax.grid(True, alpha=0.3)
         ax.set_aspect("equal")
-        ax.set_xlim(-2.5, 2.5)
-        ax.set_ylim(-2.5, 2.5)
+        ax.set_xlim(self.axis_min, self.axis_max)
+        ax.set_ylim(self.axis_min, self.axis_max)
 
         plt.tight_layout()
 
