@@ -70,13 +70,9 @@ class OfflineSkipDataset(Dataset):
         # -------------------------------------------------------
 
         # Position normalization
-        if "flat_mean" in archive:
-            self.pos_mean = archive["flat_mean"].astype(np.float32)
-            self.pos_std  = archive["flat_std"].astype(np.float32)
-        else:
-            # backward compatibility with newly generated datasets
-            self.pos_mean = archive["pos_mean"].astype(np.float32)
-            self.pos_std  = archive["pos_std"].astype(np.float32)
+        # backward compatibility with newly generated datasets
+        self.pos_mean = archive["pos_mean"].astype(np.float32)
+        self.pos_std  = archive["pos_std"].astype(np.float32)
 
         # IMPORTANT: aliases so planner code works
         self.flat_mean = self.pos_mean

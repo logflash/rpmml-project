@@ -61,8 +61,14 @@ class OfflineSkipDataset(Dataset):
         # -------------------------------------------------------
 
         # Position normalization
-        self.pos_mean = archive["flat_mean"].astype(np.float32)  # (2,)
-        self.pos_std  = archive["flat_std"].astype(np.float32)   # (2,)
+        if "flat_mean" in archive:
+            self.pos_mean = archive["flat_mean"].astype(np.float32)
+            self.pos_std  = archive["flat_std"].astype(np.float32)
+        else:
+            # backward compatibility with newly generated datasets
+            self.pos_mean = archive["pos_mean"].astype(np.float32)
+            self.pos_std  = archive["pos_std"].astype(np.float32)
+
 
         # IMPORTANT: aliases so planner code works
         self.flat_mean = self.pos_mean
@@ -666,7 +672,7 @@ class DiffuserTrainer:
 
             # Save checkpoint periodically
             if save_every > 0 and (epoch + 1) % save_every == 0:
-                checkpoint_path = f"checkpoints/diffuser_fixed_multiplied_h32_m1_s1_epoch_{epoch+1}.pt"
+                checkpoint_path = f"checkpoints/diffuser_NEW_h32_m1_s1_epoch_{epoch+1}.pt"
                 self.save_checkpoint(checkpoint_path)
                 print(f"  → Saved checkpoint to {checkpoint_path}")
 
@@ -1052,7 +1058,7 @@ if __name__ == "__main__":
     #for online benchmarking
     wandb.init(
         project="eqnet-diffuser",
-        name="h48_mu1_sig1_independent-skips",
+        name="NEW_h32_mu1_sig1_independent-skips",
         config={
             "horizon": 48,
             "timesteps": 200,
@@ -1081,7 +1087,7 @@ if __name__ == "__main__":
     # DATA
     # ========================================================================
 
-    OFFLINE_FILE = "/scratch/network/ts4953/dataset_gen/rpmml-project/timeskip-diffuser/src/timeskip_diffuser/datasets/fixed_stats_offline_umaze_multiplied_independent_skips_h32_mean1_sig1.npz"
+    OFFLINE_FILE = "/scratch/network/ts4953/dataset_gen/rpmml-project/timeskip-diffuser/src/timeskip_diffuser/datasets/NEW_h32_mu1_sig1.npz"
 
     minari_dataset = OfflineSkipDataset(
         OFFLINE_FILE,
