@@ -43,6 +43,9 @@ import yaml
 from tqdm import tqdm
 
 from timeskip_diffuser.datasets.point_maze.medium import MediumFlatDataset
+from timeskip_diffuser.datasets.point_maze.offline_skip.offline_skip import (
+    OfflineSkipDataset,
+)
 from timeskip_diffuser.datasets.point_maze.open import OpenFlatDataset
 from timeskip_diffuser.datasets.point_maze.umaze import UMazeFlatDataset
 from timeskip_diffuser.diffuser.diffusion import GaussianDiffusion
@@ -627,9 +630,6 @@ def train_model(cfg: RunConfig, run_dir: Path, logger: logging.Logger) -> None:
 
     elif cfg.dataset_type == "offline":
         # Offline dataset: load from pre-built .npz file (position + skip)
-        from timeskip_diffuser.pointmaze.eqnet_independent_copy import (
-            OfflineSkipDataset,
-        )
 
         dataset_path = cfg.train_args.get("dataset_path")
         if not dataset_path:
