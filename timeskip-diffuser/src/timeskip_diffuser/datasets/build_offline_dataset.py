@@ -59,8 +59,8 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
         self.normalize_flag = normalize
 
         # Log-normal(1, 1) parameters - fixed, no hyperparameters to tune
-        self.lognormal_mu = 1.0
-        self.lognormal_sigma = 1.0
+        self.lognormal_mu = 0.75
+        self.lognormal_sigma = 0.5625
 
         # Load dataset
         self.dataset = minari.load_dataset(dataset_name, download=True)
@@ -240,6 +240,7 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
         # If rejection sampling fails after max attempts, fall back to safe sampling
         # This should be extremely rare with lognormal(1,1)
         # Sample from first portion of trajectory to guarantee fit
+        print("Hit here")
         safe_start = np.random.uniform(0, max(0.1, T * 0.3))
         skips = self._sample_skips_parallel(self.horizon)
 

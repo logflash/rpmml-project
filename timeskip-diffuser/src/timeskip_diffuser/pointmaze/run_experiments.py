@@ -67,7 +67,7 @@ def run_planning_experiment(
             [
                 StartReachingReward(start_xy, reward_scale=5.0),
                 GoalReachingReward(goal, reward_scale=5.0),
-                SkipTotalTimeSkipPenalty(reward_scale=0.03),
+                SkipTotalTimeSkipPenalty(reward_scale=0.00),
                 CurvaturePenalty(reward_scale=0.05),
                 LogSkipReward(reward_scale=0.0),
             ]
@@ -177,8 +177,8 @@ if __name__ == "__main__":
     run_planning_experiment(
         planner,
         dataset_name="D4RL/pointmaze/umaze-v2",
-        num_tasks=50,
-        max_tries=5,
+        num_tasks=100,
+        max_tries=10,
         horizon=32,
         seed=42,
     )
