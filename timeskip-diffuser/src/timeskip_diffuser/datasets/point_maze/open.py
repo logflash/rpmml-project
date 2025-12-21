@@ -56,7 +56,7 @@ class OpenFlatDataset(Dataset):
         return torch.FloatTensor(self.normalize(trajectory))
 
     def visualize(self, flat_traj: np.ndarray, save_file: str = ""):
-        """Visualize the U-Maze environment while plotting a given flat trajectory."""
+        """Visualize the Open environment while plotting a given flat trajectory."""
 
         env = self.dataset.recover_environment()
 

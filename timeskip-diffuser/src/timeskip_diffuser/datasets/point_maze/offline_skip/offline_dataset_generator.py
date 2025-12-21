@@ -224,11 +224,14 @@ if __name__ == "__main__":
         starts_per_skip=1,
     )
 
-    raw_dataset = builder.build()
-
     out_path = (
         Path(__file__).parent.parent.parent
         / "offline_datasets"
-        / "NEW_h32_mu1_sig1.npz"
+        / "umaze_h32_mu1_sig1.npz"
     )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.touch()
+
+    raw_dataset = builder.build()
+
     normalize_and_save(raw_dataset, out_path=out_path)

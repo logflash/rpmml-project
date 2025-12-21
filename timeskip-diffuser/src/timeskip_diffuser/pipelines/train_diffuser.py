@@ -225,7 +225,7 @@ def validate_config_schema(config: Dict[str, Any]) -> None:
     required_keys = {
         "env": ["name"],
         "model": ["architecture"],
-        "paths": ["work_dir", "dataset_script", "dataset_out"],
+        "paths": ["work_dir"],  # dataset_script and dataset_out are optional
     }
 
     for section, keys in required_keys.items():
@@ -309,6 +309,7 @@ def capture_experiment_metadata(cfg: "RunConfig", config_path: Path) -> Dict[str
             "architecture": cfg.architecture,
             "seed": cfg.seed,
             "skips": cfg.skips,
+            "dataset_type": cfg.dataset_type,
         },
         "system": {
             "hostname": socket.gethostname(),
@@ -317,8 +318,7 @@ def capture_experiment_metadata(cfg: "RunConfig", config_path: Path) -> Dict[str
             "working_directory": str(Path.cwd()),
         },
         "paths": {
-            "dataset_script": str(cfg.dataset_script),
-            "dataset_out": str(cfg.dataset_out),
+            "dataset_path": str(cfg.dataset_path) if cfg.dataset_path else None,
         },
         "dataset_args": cfg.dataset_args,
         "train_args": cfg.train_args,
@@ -365,12 +365,11 @@ class RunConfig:
     skips: bool  # Whether model uses skip connections
 
     # Dataset configuration
-    dataset_type: str  # "offline" (npz file) or "flat" (UMazeFlatDataset)
+    dataset_type: str  # "skip" (npz file with skip data) or "flat" (UMazeFlatDataset)
+    dataset_path: Optional[Path]  # Path to npz file (for skip datasets only)
 
     # Directory and file paths
     work_dir: Path  # Root directory for experiment outputs
-    dataset_script: Path  # Path to dataset creation script
-    dataset_out: Path  # Output path for generated .npz dataset
 
     # Arguments passed to dataset creation
     dataset_args: Dict[str, Any]
@@ -387,8 +386,7 @@ class RunConfig:
             "skips": self.skips,
             "dataset_type": self.dataset_type,
             "work_dir": str(self.work_dir),
-            "dataset_script": str(self.dataset_script),
-            "dataset_out": str(self.dataset_out),
+            "dataset_path": str(self.dataset_path) if self.dataset_path else None,
             "dataset_args": self.dataset_args,
             "train_args": self.train_args,
         }
@@ -417,30 +415,40 @@ def parse_config(d: Dict[str, Any]) -> RunConfig:
     seed = int(d.get("seed", 0))
     skips = bool(d["model"].get("skips", False))
 
-    # Dataset type: 'offline' (from .npz) or 'flat' (UMazeFlatDataset)
-    dataset_type = d.get("dataset", {}).get("type", "offline")
-    if dataset_type not in ["offline", "flat"]:
+    # Dataset type: 'flat' (position-only from Minari) or 'skip' (offline .npz with skip)
+    dataset_type = d.get("dataset", {}).get("type", "flat")
+    if dataset_type not in ["skip", "flat"]:
         raise ValueError(
-            f"Invalid dataset.type: '{dataset_type}'. Must be 'offline' or 'flat'"
+            f"Invalid dataset.type: '{dataset_type}'. Must be 'flat' or 'skip'"
         )
 
     # Expand paths (support env variables and ~)
     work_dir = Path(d["paths"]["work_dir"]).expanduser()
-    dataset_script = Path(d["paths"]["dataset_script"]).expanduser()
-    dataset_out = Path(d["paths"]["dataset_out"]).expanduser()
 
-    # Validate that dataset script exists (only for offline mode)
-    if dataset_type == "offline" and not dataset_script.exists():
-        raise FileNotFoundError(f"Dataset script not found: {dataset_script}")
+    # For skip dataset, get npz_file path from dataset config or construct default
+    if dataset_type == "skip":
+        # Check if npz_file is specified in dataset args
+        npz_file = d.get("dataset", {}).get("npz_file")
+        if npz_file:
+            dataset_path = Path(npz_file).expanduser()
+        else:
+            # Auto-construct path based on environment name
+            # Default: timeskip-diffuser/datasets/offline_datasets/{env_name}_h32_mu1_sig1.npz
+            base_dir = Path(__file__).parent.parent / "datasets" / "offline_datasets"
+            horizon = d.get("dataset", {}).get("args", {}).get("horizon", 32)
+            dataset_path = base_dir / f"{env_name}_h{horizon}_mu1_sig1.npz"
+    else:
+        # For flat dataset, no dataset path needed
+        dataset_path = None
 
     # Build arguments dictionaries
     dataset_args = d.get("dataset", {}).get("args", {})
     train_args = d.get("train", {}).get("args", {})
 
-    # Set defaults for dataset args (only for offline mode)
-    if dataset_type == "offline":
+    # Set defaults for dataset args
+    dataset_args.setdefault("horizon", 32)
+    if dataset_type == "skip":
         dataset_args.setdefault("dataset_id", env_to_dataset_id(env_name))
-        dataset_args.setdefault("seed", seed)
 
     # Set defaults for training args
     train_args.setdefault("env", env_name)
@@ -448,12 +456,11 @@ def parse_config(d: Dict[str, Any]) -> RunConfig:
     train_args.setdefault("seed", seed)
     train_args.setdefault("dataset_type", dataset_type)
 
-    # For offline: pass dataset path; for flat: path not used
-    if dataset_type == "offline":
-        train_args.setdefault("dataset_path", str(dataset_out))
-
-    # Pass horizon for flat dataset
-    if dataset_type == "flat":
+    # For skip: pass dataset path; for flat: pass horizon
+    if dataset_type == "skip":
+        train_args.setdefault("dataset_path", str(dataset_path))
+        train_args.setdefault("horizon", dataset_args.get("horizon", 32))
+    elif dataset_type == "flat":
         train_args.setdefault("horizon", dataset_args.get("horizon", 32))
 
     return RunConfig(
@@ -463,8 +470,7 @@ def parse_config(d: Dict[str, Any]) -> RunConfig:
         skips=skips,
         dataset_type=dataset_type,
         work_dir=work_dir,
-        dataset_script=dataset_script,
-        dataset_out=dataset_out,
+        dataset_path=dataset_path,
         dataset_args=dataset_args,
         train_args=train_args,
     )
@@ -486,10 +492,12 @@ def dataset_already_built(dataset_path: Path) -> bool:
 
 def build_dataset(cfg: RunConfig, run_dir: Path, logger: logging.Logger) -> None:
     """
-    Build dataset by calling dataset script as a subprocess.
+    Validate or build dataset.
 
     For 'flat' dataset type, this step is skipped as UMazeFlatDataset
     loads data directly from Minari.
+
+    For 'skip' dataset type, validates that the npz file exists.
 
     Args:
         cfg: Run configuration
@@ -497,6 +505,7 @@ def build_dataset(cfg: RunConfig, run_dir: Path, logger: logging.Logger) -> None
         logger: Logger instance
 
     Raises:
+        FileNotFoundError: If skip dataset file is missing
         RuntimeError: If dataset build fails or output not found
     """
     # Skip dataset building for flat dataset (loads directly from Minari)
@@ -507,59 +516,30 @@ def build_dataset(cfg: RunConfig, run_dir: Path, logger: logging.Logger) -> None
         logger.info("Skipping offline dataset build (loads from Minari directly)")
         return
 
-    ensure_dir(cfg.dataset_out.parent)
+    # For skip dataset, validate that npz file exists
+    if cfg.dataset_type == "skip":
+        if not cfg.dataset_path:
+            raise ValueError("dataset_path is required for skip dataset type")
 
-    # If already exists, keep it but record hash
-    if dataset_already_built(cfg.dataset_out):
-        logger.info(f"Dataset already exists: {cfg.dataset_out}")
-        file_size = cfg.dataset_out.stat().st_size / (1024 * 1024)  # MB
+        if not cfg.dataset_path.exists():
+            raise FileNotFoundError(
+                f"Skip dataset file not found: {cfg.dataset_path}\n"
+                f"Please ensure the npz file exists or specify the correct path in config."
+            )
+
+        logger.info(f"Using skip dataset: {cfg.dataset_path}")
+        file_size = cfg.dataset_path.stat().st_size / (1024 * 1024)  # MB
         logger.info(f"Dataset size: {file_size:.2f} MB")
+
+        # Copy into run_dir for archival
+        archived = run_dir / "artifacts" / cfg.dataset_path.name
+        ensure_dir(archived.parent)
+        shutil.copy2(cfg.dataset_path, archived)
+        logger.info(f"Dataset archived to: {archived.relative_to(run_dir)}")
         return
 
-    logger.info("Building offline dataset...")
-    logger.debug(f"Dataset script: {cfg.dataset_script}")
-    logger.debug(f"Output path: {cfg.dataset_out}")
-
-    # Build command line args from cfg.dataset_args
-    cmd = [sys.executable, str(cfg.dataset_script)]
-
-    # Standard convention: use --out for output path if present
-    # If your script uses a different flag (e.g., --offline_file), change here.
-    if "out" not in cfg.dataset_args and "offline_file" not in cfg.dataset_args:
-        cmd += ["--out", str(cfg.dataset_out)]
-
-    for k, v in cfg.dataset_args.items():
-        flag = f"--{k.replace('_', '-')}"
-        if isinstance(v, bool):
-            if v:
-                cmd.append(flag)
-        else:
-            cmd += [flag, str(v)]
-
-    # Run dataset build
-    try:
-        run_cmd(cmd, logger=logger)
-    except Exception as e:
-        logger.error(f"Dataset build failed: {e}")
-        raise
-
-    # Quick verify
-    if not dataset_already_built(cfg.dataset_out):
-        raise RuntimeError(
-            f"Dataset script ran but output not found: {cfg.dataset_out}"
-        )
-
-    file_hash = sha256_file(cfg.dataset_out)
-    file_size = cfg.dataset_out.stat().st_size / (1024 * 1024)  # MB
-    logger.info(f"Dataset built successfully: {cfg.dataset_out}")
-    logger.info(f"Dataset size: {file_size:.2f} MB")
-    logger.info(f"Dataset SHA256: {file_hash[:16]}...")
-
-    # Copy into run_dir for archival if desired
-    archived = run_dir / "artifacts" / cfg.dataset_out.name
-    ensure_dir(archived.parent)
-    shutil.copy2(cfg.dataset_out, archived)
-    logger.info(f"Dataset archived to: {archived.relative_to(run_dir)}")
+    # This shouldn't be reached with current valid dataset types
+    raise ValueError(f"Unknown dataset type: {cfg.dataset_type}")
 
 
 # ----------------------------
@@ -624,31 +604,36 @@ def train_model(cfg: RunConfig, run_dir: Path, logger: logging.Logger) -> None:
         dataset = DatasetClass(horizon=horizon)
         traj_dim = 2  # (x, y) only
         logger.info(
-            f"Loaded {dataset_name}: {len(dataset)} samples, state_dim={traj_dim},"
+            f"Loaded {dataset_name}: {len(dataset)} samples, state_dim={traj_dim}, "
             f"horizon={horizon}"
         )
 
-    elif cfg.dataset_type == "offline":
-        # Offline dataset: load from pre-built .npz file (position + skip)
+    elif cfg.dataset_type == "skip":
+        # Skip dataset: load from pre-built .npz file (position + skip)
 
         dataset_path = cfg.train_args.get("dataset_path")
         if not dataset_path:
-            raise ValueError("dataset_path required in train_args for offline dataset")
+            raise ValueError("dataset_path required in train_args for skip dataset")
 
         if not Path(dataset_path).exists():
             raise FileNotFoundError(f"Dataset file not found: {dataset_path}")
 
-        horizon = int(cfg.dataset_args.get("horizon", 32))
-        dataset = OfflineSkipDataset(dataset_path, horizon=horizon)
+        horizon = int(cfg.train_args.get("horizon", 32))
+        dataset_id = env_to_dataset_id(cfg.env_name)
+        dataset = OfflineSkipDataset(
+            file_path=dataset_path,
+            dataset_id=dataset_id,
+            horizon=horizon
+        )
         traj_dim = 3  # (x, y, skip)
         logger.info(
-            f"Loaded OfflineSkipDataset from {dataset_path}: {len(dataset)} samples,"
-            f"traj_dim={traj_dim}"
+            f"Loaded OfflineSkipDataset from {dataset_path}: {len(dataset)} samples, "
+            f"traj_dim={traj_dim}, horizon={horizon}"
         )
 
     else:
         raise ValueError(
-            f"Invalid dataset_type: {cfg.dataset_type}. Must be 'flat' or 'offline'"
+            f"Invalid dataset_type: {cfg.dataset_type}. Must be 'flat' or 'skip'"
         )
 
     # ======================================================================
@@ -930,9 +915,9 @@ Examples:
         logger.info("=" * 70)
         build_dataset(cfg, run_dir, logger)
 
-        # Log dataset hash (only for offline datasets)
-        if cfg.dataset_type == "offline":
-            ds_hash = sha256_file(cfg.dataset_out)
+        # Log dataset hash (only for skip datasets)
+        if cfg.dataset_type == "skip" and cfg.dataset_path:
+            ds_hash = sha256_file(cfg.dataset_path)
             (run_dir / "dataset.sha256").write_text(ds_hash + "\n")
             logger.info(f"Dataset hash saved: {ds_hash[:16]}...")
 
