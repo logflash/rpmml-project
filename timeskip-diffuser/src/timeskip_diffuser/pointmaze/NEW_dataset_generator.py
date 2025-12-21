@@ -207,8 +207,8 @@ def normalize_and_save(dataset, out_path):
     np.savez(
         out_path,
         data=dataset_norm,
-        pos_mean=pos_mean,
-        pos_std=pos_std,
+        flat_mean=pos_mean,
+        flat_std=pos_std,
         skip_mean=skip_mean,
         skip_std=skip_std,
         full_mean=np.array([*pos_mean, skip_mean], dtype=np.float32),
