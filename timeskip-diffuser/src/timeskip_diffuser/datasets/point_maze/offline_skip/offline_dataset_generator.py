@@ -1,16 +1,18 @@
-import numpy as np
+from pathlib import Path
+
 import minari
+import numpy as np
 from tqdm import tqdm
-from traj_verifiers.verifier import (
+
+from timeskip_diffuser.datasets.point_maze.offline_skip.traj_verifiers.verifier import (
     extract_wall_rects,
     verify_trajectory_dense,
 )
-from eqnet_independent_copy import expand_spline_from_skip_list
+from timeskip_diffuser.diffuser.planner import expand_spline_from_skip_list
 
 # ============================================================
 #                 OFFLINE DATASET GENERATOR
 # ============================================================
-
 
 
 class OfflineIndependentSkipDatasetBuilder:
@@ -75,8 +77,8 @@ class OfflineIndependentSkipDatasetBuilder:
     # --------------------------------------------------
 
     def _sample_skips(self):
-        return np.random.lognormal(
-            self.log_mu, self.log_sigma, self.horizon
+        return np.array(
+            np.random.lognormal(self.log_mu, self.log_sigma, self.horizon)
         ).astype(np.float32)
 
     def _interp(self, pos, tau):
@@ -109,9 +111,7 @@ class OfflineIndependentSkipDatasetBuilder:
             max_start = (T - 1) - total_skip
 
             # 3) sample multiple starts
-            start_taus = np.random.uniform(
-                0, max_start, size=self.starts_per_skip
-            )
+            start_taus = np.random.uniform(0, max_start, size=self.starts_per_skip)
 
             cum = np.cumsum(skips)
 
@@ -124,29 +124,18 @@ class OfflineIndependentSkipDatasetBuilder:
                     dtype=np.float32,
                 )
 
-                skip_list = [
-                    (coarse_pos[i], skips[i]) for i in range(self.horizon)
-                ]
+                skip_list = [(coarse_pos[i], skips[i]) for i in range(self.horizon)]
                 pos_dense, _, _ = self.spline_func(skip_list)
 
                 feasible, _ = self.collision_checker(pos_dense)
                 if feasible:
-                    windows.append(
-                        np.concatenate(
-                            [coarse_pos, skips[:, None]], axis=1
-                        )
-                    )
+                    windows.append(np.concatenate([coarse_pos, skips[:, None]], axis=1))
 
             # If we got at least one valid placement, stop resampling skips
             if len(windows) > 0:
                 break
 
         return windows  # may be empty
-
-
-
-
-
 
     # --------------------------------------------------
     # Main build function
@@ -159,7 +148,9 @@ class OfflineIndependentSkipDatasetBuilder:
         """
         collected = []
 
-        total = len(self.trajectories) * self.samples_per_trajectory * self.starts_per_skip
+        total = (
+            len(self.trajectories) * self.samples_per_trajectory * self.starts_per_skip
+        )
         print("Collecting valid coarse trajectories...")
 
         with tqdm(total=total) as pbar:
@@ -178,7 +169,6 @@ class OfflineIndependentSkipDatasetBuilder:
         return np.stack(collected, axis=0)
 
 
-
 def normalize_and_save(dataset, out_path):
     """
     dataset: (N, H, 3) unnormalized
@@ -188,11 +178,10 @@ def normalize_and_save(dataset, out_path):
     skip = dataset[..., 2].reshape(-1)
 
     pos_mean = pos.mean(axis=0).astype(np.float32)
-    pos_std  = pos.std(axis=0).astype(np.float32) + 1e-8
+    pos_std = pos.std(axis=0).astype(np.float32) + 1e-8
 
     skip_mean = skip.mean().astype(np.float32)
-    skip_std  = skip.std().astype(np.float32) + 1e-8
-
+    skip_std = skip.std().astype(np.float32) + 1e-8
 
     print("\nNormalization statistics (from SURVIVING samples):")
     print(f"  pos_mean : {pos_mean}")
@@ -202,7 +191,7 @@ def normalize_and_save(dataset, out_path):
 
     dataset_norm = dataset.copy()
     dataset_norm[..., :2] = (dataset[..., :2] - pos_mean) / pos_std
-    dataset_norm[...,  2] = (dataset[...,  2] - skip_mean) / skip_std
+    dataset_norm[..., 2] = (dataset[..., 2] - skip_mean) / skip_std
 
     np.savez(
         out_path,
@@ -212,7 +201,7 @@ def normalize_and_save(dataset, out_path):
         skip_mean=skip_mean,
         skip_std=skip_std,
         full_mean=np.array([*pos_mean, skip_mean], dtype=np.float32),
-        full_std=np.array([*pos_std,  skip_std], dtype=np.float32),
+        full_std=np.array([*pos_std, skip_std], dtype=np.float32),
     )
 
     print("Saved dataset:", out_path)
@@ -220,8 +209,7 @@ def normalize_and_save(dataset, out_path):
 
 
 if __name__ == "__main__":
-    
-    
+
     DATASET_NAME = "D4RL/pointmaze/umaze-v2"
 
     wall_rects = extract_wall_rects(DATASET_NAME)
@@ -233,12 +221,14 @@ if __name__ == "__main__":
         max_rejection_attempts=1000,
         spline_func=expand_spline_from_skip_list,
         collision_checker=lambda p: verify_trajectory_dense(p, wall_rects),
-        starts_per_skip=1
+        starts_per_skip=1,
     )
 
     raw_dataset = builder.build()
 
-    normalize_and_save(
-        raw_dataset,
-        out_path="NEW_h32_mu1_sig1.npz"
+    out_path = (
+        Path(__file__).parent.parent.parent
+        / "offline_datasets"
+        / "NEW_h32_mu1_sig1.npz"
     )
+    normalize_and_save(raw_dataset, out_path=out_path)
