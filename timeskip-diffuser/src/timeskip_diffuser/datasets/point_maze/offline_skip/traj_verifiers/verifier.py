@@ -1,13 +1,10 @@
-import mujoco
+"""Trajectory verification functions."""
+
 import minari
+import mujoco
 import numpy as np
 
-#LAST CELL OF SKIP_INDEPENDENT.IPYNB HAS DEBUG FOR THIS MODULE
-#IT PLOTS RED CIRCLE AT FIRST COLLISION FOR GIVEN TRAJECTORY
 
-#Pointmaze-agnostic verifier -> just put in correct wall_rects list for given env and call
-#verify_trajectory_dense; this assumes a dense trajectory as it doesn't check interpolated
-#positions for collisions, but if traj is very dense, then no need to
 def extract_wall_rects(dataset_name):
     """
     Given a Minari dataset name (e.g. 'D4RL/pointmaze/umaze-v2'),
@@ -23,16 +20,18 @@ def extract_wall_rects(dataset_name):
 
     # Unwrap gym / wrappers
     while hasattr(env, "env"):
-        env = env.env
+        env = env.env  # type: ignore
 
     # MuJoCo model
-    mj_model = env.model
+    mj_model = env.model  # type: ignore
 
     # Extract wall rectangles
     rects = []
     for geom_id in range(mj_model.ngeom):
-        name = mujoco.mj_id2name(
-            mj_model, mujoco.mjtObj.mjOBJ_GEOM, geom_id
+        name = mujoco.mj_id2name(  # type: ignore # pylint: disable=no-member
+            mj_model,
+            mujoco.mjtObj.mjOBJ_GEOM,  # type: ignore # pylint: disable=no-member
+            geom_id,
         )
 
         if name is None or "block" not in name:
@@ -41,20 +40,19 @@ def extract_wall_rects(dataset_name):
         cx, cy = mj_model.geom_pos[geom_id][:2]
         hx, hy = mj_model.geom_size[geom_id][:2]
 
-        rects.append((
-            cx - hx, cx + hx,
-            cy - hy, cy + hy
-        ))
+        rects.append((cx - hx, cx + hx, cy - hy, cy + hy))
 
     return rects
 
 
 def point_in_any_wall(p, wall_rects):
+    """Check if a point collides with any wall (obstacle)."""
     x, y = p
     for xmin, xmax, ymin, ymax in wall_rects:
         if xmin <= x <= xmax and ymin <= y <= ymax:
             return True
     return False
+
 
 def verify_trajectory_dense(pos_dense, wall_rects):
     """
@@ -68,10 +66,9 @@ def verify_trajectory_dense(pos_dense, wall_rects):
     return True, None
 
 
+def sample_free_point(wall_rects, rng, bounds=(-1.4, 1.4, -1.4, 1.4), max_tries=10_000):
+    """Sample a point in free space."""
 
-#for experiments
-def sample_free_point(wall_rects,rng, bounds=(-1.4, 1.4, -1.4, 1.4), max_tries=10_000):
-    
     xmin, xmax, ymin, ymax = bounds
 
     for _ in range(max_tries):
@@ -84,14 +81,14 @@ def sample_free_point(wall_rects,rng, bounds=(-1.4, 1.4, -1.4, 1.4), max_tries=1
     raise RuntimeError("Failed to sample free point")
 
 
-
 def endpoint_within_eps(pos_dense, start_xy, goal_xy, start_eps=0.05, goal_eps=0.05):
-    start_err = np.linalg.norm(pos_dense[0]  - start_xy)
-    goal_err  = np.linalg.norm(pos_dense[-1] - goal_xy)
+    """Check if the endpoints are in the correct locations."""
+    start_err = np.linalg.norm(pos_dense[0] - start_xy)
+    goal_err = np.linalg.norm(pos_dense[-1] - goal_xy)
 
     return (
         start_err <= start_eps,
-        goal_err  <= goal_eps,
+        goal_err <= goal_eps,
         start_err,
         goal_err,
     )

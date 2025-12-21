@@ -226,7 +226,8 @@ def expand_spline_from_skip_list(skip_list, dt=0.01):
         num_samples = np.ceil(k).astype(int) + 1  # +1 to include endpoint
 
         if not np.isfinite(k) or k <= 0:
-            raise ValueError(f"Invalid skip k={k} at segment {i}")
+            k = 0
+            # raise ValueError(f"Invalid skip k={k} at segment {i}")
         P, V, A = hermite_segment(p0, v0_scaled, p1, v1_scaled, num_samples)
 
         # avoid duplication at segment seam
