@@ -1,0 +1,50 @@
+seed: 0
+
+# =========================
+# Environment
+# =========================
+env:
+  name: open
+
+# =========================
+# Model
+# =========================
+model:
+  architecture: unet
+  skips: false
+
+# =========================
+# Paths
+# =========================
+paths:
+  work_dir: runs
+
+  # These are not used for 'flat' dataset type but required by schema
+  dataset_script: timeskip-diffuser/src/timeskip_diffuser/datasets/build_offline_dataset.py
+  dataset_out: timeskip-diffuser/src/timeskip_diffuser/datasets/umaze_flat_dummy.npz
+
+# =========================
+# Dataset
+# =========================
+dataset:
+  type: flat
+
+  args:
+    horizon: 32
+    # Note: samples_per_trajectory, normalize, max_rejection_attempts
+    # are ignored for flat dataset type
+
+# =========================
+# Training
+# =========================
+train:
+  args:
+    timesteps: 200
+    lr: 1e-4
+    batch_size: 128
+    guidance_scale: 2.0
+    hidden_dim: 128
+    time_dim: 32
+    n_layers: 20
+    epochs: 20
+    save_every: 5

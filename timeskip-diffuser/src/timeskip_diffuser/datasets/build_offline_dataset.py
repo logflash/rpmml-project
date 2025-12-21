@@ -1,8 +1,8 @@
-import torch
-import numpy as np
-import minari
-from tqdm import tqdm
+import argparse
+import random
+from pathlib import Path
 
+import minari
 import numpy as np
 import torch
 from torch.utils.data import Dataset
@@ -108,8 +108,7 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
         self.action_dim = 1  # skip value
         self.traj_dim = self.state_dim + self.action_dim  # 3
 
-
-        #do same thing but with skips!!!!
+        # do same thing but with skips!!!!
         if normalize:
             self.pos_mean = all_positions.mean(axis=0).astype(np.float32)
             self.pos_std = all_positions.std(axis=0).astype(np.float32) + 1e-8
@@ -118,23 +117,22 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
             self.pos_mean = np.zeros(self.state_dim, dtype=np.float32)
             self.pos_std = np.ones(self.state_dim, dtype=np.float32)
             self.skip_mean = 0.0
-            self.skip_std  = 1.0
+            self.skip_std = 1.0
 
         # Skip normalization statistics (computed from lognormal parameters)
         # For LogNormal(μ, σ): mean = exp(μ + σ²/2), std = sqrt((exp(σ²) - 1) * exp(2μ + σ²))
-        
-        
-        #calculate based off of actual dataset
+
+        # calculate based off of actual dataset
 
         print("self.skip_mean", self.skip_mean)
         print("self.skip_std", self.skip_std)
-        
+
         # Combined mean/std over full trajectory vector [x, y, skip]
         self.mean = np.zeros(self.traj_dim, dtype=np.float32)
         self.std = np.ones(self.traj_dim, dtype=np.float32)
 
-        self.mean[:self.state_dim] = self.pos_mean
-        self.std[:self.state_dim] = self.pos_std
+        self.mean[: self.state_dim] = self.pos_mean
+        self.std[: self.state_dim] = self.pos_std
         self.mean[self.state_dim] = self.skip_mean
         self.std[self.state_dim] = self.skip_std
 
@@ -152,17 +150,17 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
             np.array of shape (n_skips,) with skip values
         """
         return np.random.lognormal(
-            mean=self.lognormal_mu,
-            sigma=self.lognormal_sigma,
-            size=n_skips
+            mean=self.lognormal_mu, sigma=self.lognormal_sigma, size=n_skips
         ).astype(np.float32)
-        
+
     def _estimate_skip_stats(self, num_windows=50_000):
         all_skips = []
 
         for _ in range(num_windows):
             traj_idx = np.random.randint(len(self.trajectories))
-            positions = self.trajectories[traj_idx]
+            positions = self.trajectories[  # pylint: disable=invalid-sequence-index
+                traj_idx
+            ]
 
             _, window_skips = self._generate_window_with_rejection(positions)
             all_skips.append(window_skips)
@@ -170,7 +168,7 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
         all_skips = np.concatenate(all_skips, axis=0)
 
         skip_mean = all_skips.mean().astype(np.float32)
-        skip_std  = all_skips.std().astype(np.float32) + 1e-8
+        skip_std = all_skips.std().astype(np.float32) + 1e-8
 
         return skip_mean, skip_std
 
@@ -212,7 +210,7 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
         """
         T = len(positions)
 
-        for attempt in range(self.max_rejection_attempts):
+        for _ in range(self.max_rejection_attempts):
             # Sample starting position uniformly from entire trajectory
             start_tau = np.random.uniform(0, T - 1)
 
@@ -230,10 +228,10 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
 
             if max_tau <= T - 1:
                 # Success! All positions fit within trajectory
-                window_positions = np.array([
-                    self._interpolate_position(positions, tau)
-                    for tau in taus
-                ], dtype=np.float32)
+                window_positions = np.array(
+                    [self._interpolate_position(positions, tau) for tau in taus],
+                    dtype=np.float32,
+                )
 
                 return window_positions, skips
 
@@ -255,10 +253,10 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
         cumulative_skips = np.cumsum(skips)
         taus = safe_start + np.concatenate([[0], cumulative_skips[:-1]])
 
-        window_positions = np.array([
-            self._interpolate_position(positions, tau)
-            for tau in taus
-        ], dtype=np.float32)
+        window_positions = np.array(
+            [self._interpolate_position(positions, tau) for tau in taus],
+            dtype=np.float32,
+        )
 
         return window_positions, skips
 
@@ -304,7 +302,7 @@ class MinariTrajectoryDatasetIndependentSkips(Dataset):
 
         # Build trajectory tensor [H, 3]
         trajectory = np.zeros((self.horizon, self.traj_dim), dtype=np.float32)
-        trajectory[:, :self.state_dim] = positions_norm
+        trajectory[:, : self.state_dim] = positions_norm
         trajectory[:, self.state_dim] = skips_norm
 
         return torch.FloatTensor(trajectory)
