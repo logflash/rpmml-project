@@ -807,7 +807,7 @@ def create_run_directory(cfg: RunConfig, resume_dir: Optional[Path] = None) -> P
 
     # Create new run directory with timestamp
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_name = f"{cfg.env_name}_{cfg.architecture}_seed{cfg.seed}_{ts}"
+    run_name = f"{cfg.env_name}_{cfg.architecture}_{cfg.dataset_type}_seed{cfg.seed}_{ts}"
     run_dir = ensure_dir(cfg.work_dir / run_name)
 
     # Create subdirectories
