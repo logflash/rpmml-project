@@ -5,13 +5,13 @@ env:
 
 model:
   architecture: unet
-  skips: false
+  skips: true
 
 paths:
   work_dir: runs
 
 dataset:
-  type: flat
+  type: skip
   args:
     horizon: 32
 

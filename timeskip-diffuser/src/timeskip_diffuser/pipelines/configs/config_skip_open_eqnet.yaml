@@ -4,14 +4,14 @@ env:
   name: open
 
 model:
-  architecture: unet
-  skips: false
+  architecture: eqnet
+  skips: true
 
 paths:
   work_dir: runs
 
 dataset:
-  type: flat
+  type: skip
   args:
     horizon: 32
 
@@ -21,7 +21,8 @@ train:
     lr: 1e-4
     batch_size: 128
     guidance_scale: 2.0
-    hidden_dims: [128, 256, 512]
-    time_dim: 64
+    hidden_dim: 128
+    time_dim: 32
+    n_layers: 10
     epochs: 20
     save_every: 5

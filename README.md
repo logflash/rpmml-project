@@ -29,5 +29,5 @@ echo "source /scratch/network/${USER}/rpmml-project/.venv/bin/activate" >> ~/.ba
 
 # Pytorch setup
 python -m ensurepip --upgrade
-uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+uv pip install --no-cache torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
 ```

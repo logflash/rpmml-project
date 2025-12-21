@@ -1,17 +1,17 @@
 seed: 0
 
 env:
-  name: open
+  name: medium
 
 model:
   architecture: unet
-  skips: false
+  skips: true
 
 paths:
   work_dir: runs
 
 dataset:
-  type: flat
+  type: skip
   args:
     horizon: 32
 

@@ -56,7 +56,7 @@ class MediumFlatDataset(Dataset):
         return torch.FloatTensor(self.normalize(trajectory))
 
     def visualize(self, flat_traj: np.ndarray, save_file: str = ""):
-        """Visualize the U-Maze environment while plotting a given flat trajectory."""
+        """Visualize the Medium environment while plotting a given flat trajectory."""
 
         env = self.dataset.recover_environment()
 
@@ -136,8 +136,8 @@ class MediumFlatDataset(Dataset):
         ax.legend(loc="upper right", fontsize=10)
         ax.grid(True, alpha=0.3)
         ax.set_aspect("equal")
-        ax.set_xlim(-2.5, 2.5)
-        ax.set_ylim(-2.5, 2.5)
+        ax.set_xlim(-4, 4)
+        ax.set_ylim(-4, 4)
 
         plt.tight_layout()
 
