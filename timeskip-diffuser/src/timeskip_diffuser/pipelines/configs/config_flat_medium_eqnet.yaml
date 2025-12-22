@@ -22,7 +22,7 @@ train:
     batch_size: 128
     guidance_scale: 2.0
     hidden_dim: 128
-    time_dim: 32
+    time_dim: 64
     n_layers: 10
     epochs: 20
     save_every: 5
