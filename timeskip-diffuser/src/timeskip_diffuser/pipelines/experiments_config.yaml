@@ -1,0 +1,16 @@
+  
+env: "open"
+
+paths: 
+  work_dir: runs
+  task_file: /scratch/network/ts4953/recloned/rpmml-project/timeskip-diffuser/src/timeskip_diffuser/datasets/point_maze/start_goal/open_start_goal_100.npz
+  ckpt_file: /scratch/network/ts4953/recloned/rpmml-project/timeskip-diffuser/src/timeskip_diffuser/pipelines/runs/open_unet_skip_seed0_20251221_174653/checkpoints/diffuser_unet_epoch_20.pt
+  dataset_file: /scratch/network/ts4953/recloned/rpmml-project/timeskip-diffuser/src/timeskip_diffuser/datasets/offline_datasets/open_h32_mu1_sig1.npz
+
+model:
+  architecture: unet
+  skips: true
+
+testing:
+  horizon: 32
+  max_tries: 1
