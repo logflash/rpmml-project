@@ -159,7 +159,7 @@ class OfflineSkipDataset:
         # Final figure styling
         ax.set_xlabel("X", fontsize=12)
         ax.set_ylabel("Y", fontsize=12)
-        ax.set_title("PointMaze Trajectory", fontsize=14)
+        # ax.set_title("PointMaze Trajectory", fontsize=14)
         ax.legend(loc="upper right", fontsize=10)
         ax.grid(True, alpha=0.3)
         ax.set_aspect("equal")

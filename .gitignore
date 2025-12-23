@@ -203,6 +203,7 @@ __unused/
 logs/
 output/
 runs/
+figures/
 
 # --- CACHE / GENERATED FILES ---
 __pycache__/
