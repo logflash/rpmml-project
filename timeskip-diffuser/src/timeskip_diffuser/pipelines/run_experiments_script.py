@@ -1,24 +1,38 @@
-import yaml
-import numpy as np
-import torch
-from timeskip_diffuser.diffuser.nets import EqNet, TemporalUNet
-from timeskip_diffuser.diffuser.diffusion import GaussianDiffusion
-from timeskip_diffuser.diffuser.trainer import DiffuserTrainer
-from timeskip_diffuser.diffuser.planner import DiffuserPlanner, expand_spline_from_skip_list
-from timeskip_diffuser.datasets.point_maze.offline_skip.offline_skip import OfflineSkipDataset
-from timeskip_diffuser.datasets.point_maze.umaze import UMazeFlatDataset
-from timeskip_diffuser.datasets.point_maze.medium import MediumFlatDataset
-from timeskip_diffuser.datasets.point_maze.open import OpenFlatDataset
-from timeskip_diffuser.datasets.point_maze.offline_skip.traj_verifiers.verifier import (
-    extract_wall_rects, verify_trajectory_dense, endpoint_within_eps, check_consecutive_points
-)
-from timeskip_diffuser.diffuser.reward import CompositeReward, StartReachingReward, GoalReachingReward, TotalTimeSkipPenalty, CurvaturePenalty, PathLengthPenalty
-
-
+import argparse
 import os
 from datetime import datetime
-import argparse
+
+import numpy as np
+import torch
 import yaml
+
+from timeskip_diffuser.datasets.point_maze.medium import MediumFlatDataset
+from timeskip_diffuser.datasets.point_maze.offline_skip.offline_skip import (
+    OfflineSkipDataset,
+)
+from timeskip_diffuser.datasets.point_maze.offline_skip.traj_verifiers.verifier import (
+    check_consecutive_points,
+    endpoint_within_eps,
+    extract_wall_rects,
+    verify_trajectory_dense,
+)
+from timeskip_diffuser.datasets.point_maze.open import OpenFlatDataset
+from timeskip_diffuser.datasets.point_maze.umaze import UMazeFlatDataset
+from timeskip_diffuser.diffuser.diffusion import GaussianDiffusion
+from timeskip_diffuser.diffuser.nets import EqNet, TemporalUNet
+from timeskip_diffuser.diffuser.planner import (
+    DiffuserPlanner,
+    expand_spline_from_skip_list,
+)
+from timeskip_diffuser.diffuser.reward import (
+    CompositeReward,
+    CurvaturePenalty,
+    GoalReachingReward,
+    PathLengthPenalty,
+    StartReachingReward,
+    TotalTimeSkipPenalty,
+)
+from timeskip_diffuser.diffuser.trainer import DiffuserTrainer
 
 # -----------------------------
 # Hardcoded experiment params
@@ -32,10 +46,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # -----------------------------
 parser = argparse.ArgumentParser()
 parser.add_argument(
-    "--config",
-    type=str,
-    required=True,
-    help="Path to experiment YAML config"
+    "--config", type=str, required=True, help="Path to experiment YAML config"
 )
 args = parser.parse_args()
 
@@ -63,7 +74,6 @@ tasks = np.load(task_file)
 starts = tasks["starts"]
 goals = tasks["goals"]
 assert len(starts) == len(goals)
-
 
 
 # -----------------------------
@@ -127,7 +137,7 @@ for i, (start, goal) in enumerate(zip(starts, goals)):
     solved = False
 
     for _ in range(MAX_TRIES):
-            
+
         reward_fn = CompositeReward(
             [
                 StartReachingReward(start, reward_scale=5.0),
@@ -135,7 +145,7 @@ for i, (start, goal) in enumerate(zip(starts, goals)):
                 CurvaturePenalty(reward_scale=0.05),
             ]
         )
-        
+
         if use_skips:
             traj = planner.plan_and_reconstruct(
                 current_obs=start[:2],
@@ -174,17 +184,19 @@ for i, (start, goal) in enumerate(zip(starts, goals)):
             successes += 1
             solved = True
             break
-            
-    results.append({
-        "task_id": i,
-        "start": start.tolist(),
-        "goal": goal.tolist(),
-        "solved": solved,
-        "feasible": feasible,
-        "start_ok": start_ok,
-        "goal_ok": goal_ok,
-        "valid_gaps": valid_gaps,
-    })
+
+    results.append(
+        {
+            "task_id": i,
+            "start": start.tolist(),
+            "goal": goal.tolist(),
+            "solved": solved,
+            "feasible": feasible,
+            "start_ok": start_ok,
+            "goal_ok": goal_ok,
+            "valid_gaps": valid_gaps,
+        }
+    )
 
     print(f"Task {i+1:03d}: {'✓' if solved else '✗'}")
 
@@ -206,8 +218,7 @@ skips_name = "skips" if use_skips else "flat"
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 out_file = os.path.join(
-    work_dir,
-    f"experiment_{env_name}_{arch_name}_{skips_name}_{timestamp}.txt"
+    work_dir, f"experiment_{env_name}_{arch_name}_{skips_name}_{timestamp}.txt"
 )
 
 with open(out_file, "w") as f:
@@ -219,7 +230,6 @@ with open(out_file, "w") as f:
     f.write(f"allowed_eps={ALLOWED_EPS}\n")
     f.write(f"max_allowed_jump={MAX_ALLOWED_JUMP}\n")
     f.write(f"success_rate={successes / len(starts):.3f}\n\n")
-
 
     for r in results:
         f.write(
