@@ -55,6 +55,62 @@ class UMazeFlatDataset(Dataset):
         trajectory = self.trajectories[traj_idx][start_t : start_t + self.horizon]
         return torch.FloatTensor(self.normalize(trajectory))
 
+    def show_env(self, save_file: str = ""):
+        """Visualize the environment without any trajectory."""
+
+        env = self.dataset.recover_environment()
+
+        def unwrap_env(env) -> gym.Env:
+            while hasattr(env, "env"):
+                env = env.env
+            return env
+
+        env = unwrap_env(env)
+        model = env.model  # type: ignore
+
+        # Create figure
+        _, ax = plt.subplots(figsize=(6, 6))
+
+        # Render MuJoCo walls
+        for geom_id in range(model.ngeom):
+            # Get geom name
+            name = mujoco.mj_id2name(  # pylint: disable=no-member # type: ignore
+                model,
+                mujoco.mjtObj.mjOBJ_GEOM,  # pylint: disable=no-member # type: ignore
+                geom_id,
+            )
+
+            if name is None or "block" not in name:
+                continue
+
+            cx, cy = model.geom_pos[geom_id][:2]  # center
+            hx, hy = model.geom_size[geom_id][:2]  # half-extents
+
+            rect = Rectangle(
+                (cx - hx, cy - hy),
+                2 * hx,
+                2 * hy,
+                facecolor="black",
+                alpha=0.35,
+                zorder=0,
+            )
+            ax.add_patch(rect)
+
+        # Final figure styling
+        ax.set_xlabel("X", fontsize=12)
+        ax.set_ylabel("Y", fontsize=12)
+        ax.grid(True, alpha=0.3)
+        ax.set_aspect("equal")
+        ax.set_xlim(-2.5, 2.5)
+        ax.set_ylim(-2.5, 2.5)
+
+        plt.tight_layout()
+
+        if save_file:
+            plt.savefig(save_file)
+        else:
+            plt.show()
+
     def visualize(self, flat_traj: np.ndarray, save_file: str = ""):
         """Visualize the U-Maze environment while plotting a given flat trajectory."""
 
@@ -133,7 +189,7 @@ class UMazeFlatDataset(Dataset):
         # Final figure styling
         ax.set_xlabel("X", fontsize=12)
         ax.set_ylabel("Y", fontsize=12)
-        ax.set_title("PointMaze Trajectory", fontsize=14)
+        # ax.set_title("PointMaze Trajectory", fontsize=14)
         ax.legend(loc="upper right", fontsize=10)
         ax.grid(True, alpha=0.3)
         ax.set_aspect("equal")
