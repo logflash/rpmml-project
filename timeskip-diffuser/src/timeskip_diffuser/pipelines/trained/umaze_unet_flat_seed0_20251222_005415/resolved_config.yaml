@@ -1,0 +1,26 @@
+env_name: umaze
+architecture: unet
+seed: 0
+skips: false
+dataset_type: flat
+work_dir: runs
+dataset_path: null
+dataset_args:
+  horizon: 32
+train_args:
+  timesteps: 200
+  lr: 1e-4
+  batch_size: 128
+  guidance_scale: 2.0
+  hidden_dims:
+  - 128
+  - 256
+  - 512
+  time_dim: 64
+  epochs: 20
+  save_every: 5
+  env: umaze
+  architecture: unet
+  seed: 0
+  dataset_type: flat
+  horizon: 32

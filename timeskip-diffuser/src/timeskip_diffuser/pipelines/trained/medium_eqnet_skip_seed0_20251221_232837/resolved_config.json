@@ -1,0 +1,30 @@
+{
+  "env_name": "medium",
+  "architecture": "eqnet",
+  "seed": 0,
+  "skips": true,
+  "dataset_type": "skip",
+  "work_dir": "runs",
+  "dataset_path": "/scratch/network/ts4953/recloned/rpmml-project/timeskip-diffuser/src/timeskip_diffuser/datasets/offline_datasets/medium_h32_mu1_sig1.npz",
+  "dataset_args": {
+    "horizon": 32,
+    "dataset_id": "D4RL/pointmaze/medium-v2"
+  },
+  "train_args": {
+    "timesteps": 200,
+    "lr": "1e-4",
+    "batch_size": 128,
+    "guidance_scale": 2.0,
+    "hidden_dim": 128,
+    "time_dim": 64,
+    "n_layers": 10,
+    "epochs": 20,
+    "save_every": 5,
+    "env": "medium",
+    "architecture": "eqnet",
+    "seed": 0,
+    "dataset_type": "skip",
+    "dataset_path": "/scratch/network/ts4953/recloned/rpmml-project/timeskip-diffuser/src/timeskip_diffuser/datasets/offline_datasets/medium_h32_mu1_sig1.npz",
+    "horizon": 32
+  }
+}

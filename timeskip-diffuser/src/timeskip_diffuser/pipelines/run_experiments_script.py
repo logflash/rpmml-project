@@ -10,9 +10,9 @@ from timeskip_diffuser.datasets.point_maze.umaze import UMazeFlatDataset
 from timeskip_diffuser.datasets.point_maze.medium import MediumFlatDataset
 from timeskip_diffuser.datasets.point_maze.open import OpenFlatDataset
 from timeskip_diffuser.datasets.point_maze.offline_skip.traj_verifiers.verifier import (
-    extract_wall_rects, verify_trajectory_dense, endpoint_within_eps
+    extract_wall_rects, verify_trajectory_dense, endpoint_within_eps, check_consecutive_points
 )
-from timeskip_diffuser.diffuser.reward import CompositeReward, StartReachingReward, GoalReachingReward, TotalTimeSkipPenalty, CurvaturePenalty, LogSkipReward
+from timeskip_diffuser.diffuser.reward import CompositeReward, StartReachingReward, GoalReachingReward, TotalTimeSkipPenalty, CurvaturePenalty, PathLengthPenalty
 
 
 import os
@@ -52,6 +52,8 @@ dataset_file = cfg["paths"].get("dataset_file", None)
 
 HORIZON = cfg["testing"]["horizon"]
 MAX_TRIES = cfg["testing"]["max_tries"]
+ALLOWED_EPS = cfg["testing"]["allowed_eps"]
+MAX_ALLOWED_JUMP = cfg["testing"]["max_allowed_jump"]
 results = []
 
 # -----------------------------
@@ -82,7 +84,6 @@ else:
         raise ValueError(f"Unknown env: {env_name}")
     state_dim = dataset.state_dim
 
-ALLOWED_EPS = 0.2
 # -----------------------------
 # Model selection
 # -----------------------------
@@ -126,15 +127,15 @@ for i, (start, goal) in enumerate(zip(starts, goals)):
     solved = False
 
     for _ in range(MAX_TRIES):
+            
         reward_fn = CompositeReward(
             [
                 StartReachingReward(start, reward_scale=5.0),
                 GoalReachingReward(goal, reward_scale=5.0),
                 CurvaturePenalty(reward_scale=0.05),
-                # Only meaningful if skips=True
-                #TotalTimeSkipPenalty(reward_scale=0.0),
             ]
         )
+        
         if use_skips:
             traj = planner.plan_and_reconstruct(
                 current_obs=start[:2],
@@ -167,8 +168,9 @@ for i, (start, goal) in enumerate(zip(starts, goals)):
         start_ok, goal_ok, _, _ = endpoint_within_eps(
             pos, start, goal, ALLOWED_EPS, ALLOWED_EPS
         )
+        valid_gaps = check_consecutive_points(pos, MAX_ALLOWED_JUMP)
 
-        if feasible and start_ok and goal_ok:
+        if feasible and start_ok and goal_ok and valid_gaps:
             successes += 1
             solved = True
             break
@@ -178,6 +180,10 @@ for i, (start, goal) in enumerate(zip(starts, goals)):
         "start": start.tolist(),
         "goal": goal.tolist(),
         "solved": solved,
+        "feasible": feasible,
+        "start_ok": start_ok,
+        "goal_ok": goal_ok,
+        "valid_gaps": valid_gaps,
     })
 
     print(f"Task {i+1:03d}: {'✓' if solved else '✗'}")
@@ -210,7 +216,8 @@ with open(out_file, "w") as f:
     f.write(f"skips={use_skips}\n")
     f.write(f"horizon={HORIZON}\n")
     f.write(f"max_tries={MAX_TRIES}\n")
-    f.write(f"allowed_eps={ALLOWED_EPS}")
+    f.write(f"allowed_eps={ALLOWED_EPS}\n")
+    f.write(f"max_allowed_jump={MAX_ALLOWED_JUMP}\n")
     f.write(f"success_rate={successes / len(starts):.3f}\n\n")
 
 
@@ -219,6 +226,9 @@ with open(out_file, "w") as f:
             f"task={r['task_id']:03d} "
             f"start={r['start']} "
             f"goal={r['goal']} "
-            f"solved={r['solved']}\n"
-            
+            f"solved={r['solved']} "
+            f"feasible={r['feasible']} "
+            f"start_ok={r['start_ok']} "
+            f"goal_ok={r['goal_ok']} "
+            f"valid_gaps={r['valid_gaps']}\n"
         )
