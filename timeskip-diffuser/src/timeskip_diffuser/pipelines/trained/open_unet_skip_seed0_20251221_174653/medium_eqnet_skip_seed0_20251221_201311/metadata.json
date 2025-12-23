@@ -1,0 +1,45 @@
+{
+  "timestamp": "2025-12-21T20:13:11.562243",
+  "config_file": "configs/config_skip_medium_eqnet.yaml",
+  "experiment": {
+    "env_name": "medium",
+    "architecture": "eqnet",
+    "seed": 0,
+    "skips": true,
+    "dataset_type": "skip"
+  },
+  "system": {
+    "hostname": "adroit-vis.princeton.edu",
+    "platform": "Linux-5.14.0-570.60.1.el9_6.x86_64-x86_64-with-glibc2.34",
+    "python_version": "3.10.19 (main, Oct 28 2025, 12:10:48) [Clang 20.1.4 ]",
+    "working_directory": "/scratch/network/ts4953/recloned/rpmml-project/timeskip-diffuser/src/timeskip_diffuser/pipelines"
+  },
+  "paths": {
+    "dataset_path": "/scratch/network/ts4953/recloned/rpmml-project/timeskip-diffuser/src/timeskip_diffuser/datasets/offline_datasets/medium_h32_mu1_sig1.npz"
+  },
+  "dataset_args": {
+    "horizon": 32,
+    "dataset_id": "D4RL/pointmaze/medium-v2"
+  },
+  "train_args": {
+    "timesteps": 200,
+    "lr": "1e-4",
+    "batch_size": 128,
+    "guidance_scale": 2.0,
+    "hidden_dim": 128,
+    "time_dim": 64,
+    "n_layers": 10,
+    "epochs": 20,
+    "save_every": 5,
+    "env": "medium",
+    "architecture": "eqnet",
+    "seed": 0,
+    "dataset_type": "skip",
+    "dataset_path": "/scratch/network/ts4953/recloned/rpmml-project/timeskip-diffuser/src/timeskip_diffuser/datasets/offline_datasets/medium_h32_mu1_sig1.npz",
+    "horizon": 32
+  },
+  "git": {
+    "commit": "4196357615152abcc488145d6e2880866aa61c42",
+    "branch": "run_experiments"
+  }
+}

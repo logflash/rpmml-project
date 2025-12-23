@@ -72,38 +72,39 @@ class UMazeFlatDataset(Dataset):
         _, ax = plt.subplots(figsize=(6, 6))
 
         # Plot the trajectory
-        ax.scatter(
-            flat_traj[:, 0],
-            flat_traj[:, 1],
-            s=30,
-            c="#0088ff",
-            edgecolors="k",
-            zorder=4,
-        )
+        if flat_traj is not None:
+            ax.scatter(
+                flat_traj[:, 0],
+                flat_traj[:, 1],
+                s=30,
+                c="#0088ff",
+                edgecolors="k",
+                zorder=4,
+            )
 
-        # Mark start and end points
-        ax.scatter(
-            flat_traj[0, 0],
-            flat_traj[0, 1],
-            c="lime",
-            s=25,
-            marker="D",  # type: ignore
-            edgecolors="green",
-            linewidth=1,
-            zorder=4,
-            label="Start",
-        )
-        ax.scatter(
-            flat_traj[-1, 0],
-            flat_traj[-1, 1],
-            c="red",
-            s=50,
-            marker="8",  # type: ignore
-            edgecolors="darkred",
-            linewidth=1,
-            zorder=4,
-            label="End",
-        )
+            # Mark start and end points
+            ax.scatter(
+                flat_traj[0, 0],
+                flat_traj[0, 1],
+                c="lime",
+                s=25,
+                marker="D",  # type: ignore
+                edgecolors="green",
+                linewidth=1,
+                zorder=4,
+                label="Start",
+            )
+            ax.scatter(
+                flat_traj[-1, 0],
+                flat_traj[-1, 1],
+                c="red",
+                s=50,
+                marker="8",  # type: ignore
+                edgecolors="darkred",
+                linewidth=1,
+                zorder=4,
+                label="End",
+            )
 
         # Render MuJoCo walls
         for geom_id in range(model.ngeom):
