@@ -126,65 +126,110 @@ class OpenFlatDataset(Dataset):
 
         # Create figure
         _, ax = plt.subplots(figsize=(6, 6))
-
+        
+        # -----------------------------
         # Plot the trajectory
-        ax.scatter(
-            flat_traj[:, 0],
-            flat_traj[:, 1],
-            s=30,
-            c="#0088ff",
-            edgecolors="k",
-            zorder=4,
-        )
+        if flat_traj is not None: 
+            ax.scatter(
+                flat_traj[:, 0],
+                flat_traj[:, 1],
+                s=30,
+                c="#0088ff",
+                edgecolors="k",
+                zorder=4,
+            )
+        
 
-        # Mark start and end points
-        ax.scatter(
-            flat_traj[0, 0],
-            flat_traj[0, 1],
-            c="lime",
-            s=25,
-            marker="D",  # type: ignore
-            edgecolors="green",
-            linewidth=1,
-            zorder=4,
-            label="Start",
-        )
-        ax.scatter(
-            flat_traj[-1, 0],
-            flat_traj[-1, 1],
-            c="red",
-            s=50,
-            marker="8",  # type: ignore
-            edgecolors="darkred",
-            linewidth=1,
-            zorder=4,
-            label="End",
-        )
-
-        # Render MuJoCo walls
-        for geom_id in range(model.ngeom):
-            # Get geom name
-            name = mujoco.mj_id2name(  # pylint: disable=no-member # type: ignore
-                model,
-                mujoco.mjtObj.mjOBJ_GEOM,  # pylint: disable=no-member # type: ignore
-                geom_id,
+            # Mark start and end points
+            ax.scatter(
+                flat_traj[0, 0],
+                flat_traj[0, 1],
+                c="lime",
+                s=500,
+                marker="D",  # type: ignore
+                edgecolors="green",
+                linewidth=1,
+                zorder=3,
+                label="Start",
+            )
+            ax.scatter(
+                flat_traj[-1, 0],
+                flat_traj[-1, 1],
+                c="red",
+                s=500,
+                marker="8",  # type: ignore
+                edgecolors="darkred",
+                linewidth=1,
+                zorder=3,
+                label="End",
             )
 
+        # -----------------------------
+        # Infer wall thickness + color from MuJoCo blocks
+        # -----------------------------
+        wall_thickness = None
+        wall_color = None
+
+        for geom_id in range(model.ngeom):
+            name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, geom_id)
+            if name is not None and "block" in name:
+                hx, hy = model.geom_size[geom_id][:2]
+                wall_thickness = 2 * hx      # IMPORTANT: twice as wide
+                wall_color = (0.65, 0.65, 0.65)
+                break
+
+        assert wall_thickness is not None
+
+        # True maze bounds (inner free space)
+        INNER_MIN_X, INNER_MAX_X = -2.5, 2.5
+        INNER_MIN_Y, INNER_MAX_Y = -1.5, 1.5
+
+        # -----------------------------
+        # Draw vertical boundary walls
+        # -----------------------------
+        ax.add_patch(
+            Rectangle(
+                (INNER_MIN_X - wall_thickness, INNER_MIN_Y),
+                wall_thickness,
+                INNER_MAX_Y - INNER_MIN_Y,
+                facecolor=wall_color,
+                edgecolor=None,
+                zorder=0,
+            )
+        )
+
+        ax.add_patch(
+            Rectangle(
+                (INNER_MAX_X, INNER_MIN_Y),
+                wall_thickness,
+                INNER_MAX_Y - INNER_MIN_Y,
+                facecolor=wall_color,
+                edgecolor=None,
+                zorder=0,
+            )
+        )
+
+        # -----------------------------
+        # Render MuJoCo horizontal walls
+        # -----------------------------
+        for geom_id in range(model.ngeom):
+            name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, geom_id)
             if name is None or "block" not in name:
                 continue
 
-            cx, cy = model.geom_pos[geom_id][:2]  # center
-            hx, hy = model.geom_size[geom_id][:2]  # half-extents
+            cx, cy = model.geom_pos[geom_id][:2]
+            hx, hy = model.geom_size[geom_id][:2]
 
-            rect = Rectangle(
-                (cx - hx, cy - hy),
-                2 * hx,
-                2 * hy,
-                facecolor="black",
-                alpha=0.35,
-                zorder=0,
+            ax.add_patch(
+                Rectangle(
+                    (cx - hx, cy - hy),
+                    2 * hx,
+                    2 * hy,
+                    facecolor=wall_color,
+                    edgecolor=None,
+                    zorder=0,
+                )
             )
-            ax.add_patch(rect)
 
         # Final figure styling
         ax.set_xlabel("X", fontsize=12)
@@ -193,8 +238,15 @@ class OpenFlatDataset(Dataset):
         ax.legend(loc="upper right", fontsize=10)
         ax.grid(True, alpha=0.3)
         ax.set_aspect("equal")
-        ax.set_xlim(-2.5, 2.5)
-        ax.set_ylim(-2.5, 2.5)
+        ax.set_xlim(
+            INNER_MIN_X - wall_thickness,
+            INNER_MAX_X + wall_thickness,
+        )
+        ax.set_ylim(
+            INNER_MIN_Y - wall_thickness,
+            INNER_MAX_Y + wall_thickness,
+        )
+
 
         plt.tight_layout()
 
