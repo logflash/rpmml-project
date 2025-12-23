@@ -1,3 +1,4 @@
+import argparse
 from pathlib import Path
 
 import minari
@@ -210,7 +211,16 @@ def normalize_and_save(dataset, out_path):
 
 if __name__ == "__main__":
 
-    DATASET_NAME = "D4RL/pointmaze/umaze-v2"
+    parser = argparse.ArgumentParser(description="Generate offline skip dataset")
+    parser.add_argument(
+        "--env_name",
+        type=str,
+        default="umaze",
+        help="Environment name (e.g., umaze, medium, large)",
+    )
+    args = parser.parse_args()
+
+    DATASET_NAME = f"D4RL/pointmaze/{args.env_name}-v2"
 
     wall_rects = extract_wall_rects(DATASET_NAME)
 
@@ -227,7 +237,7 @@ if __name__ == "__main__":
     OUT_PATH = (
         Path(__file__).parent.parent.parent
         / "offline_datasets"
-        / "umaze_h32_mu1_sig1.npz"
+        / f"{args.env_name}_h32_mu1_sig1.npz"
     )
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUT_PATH.touch()
