@@ -19,6 +19,7 @@ dependencies = [
     "tqdm",
     "minari[hf]",
     "minari[hfd5]",
+    "torch",
 ]
 
 [project.optional-dependencies]

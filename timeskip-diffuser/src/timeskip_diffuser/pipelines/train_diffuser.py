@@ -621,9 +621,7 @@ def train_model(cfg: RunConfig, run_dir: Path, logger: logging.Logger) -> None:
         horizon = int(cfg.train_args.get("horizon", 32))
         dataset_id = env_to_dataset_id(cfg.env_name)
         dataset = OfflineSkipDataset(
-            file_path=dataset_path,
-            dataset_id=dataset_id,
-            horizon=horizon
+            file_path=dataset_path, dataset_id=dataset_id, horizon=horizon
         )
         traj_dim = 3  # (x, y, skip)
         logger.info(
@@ -807,7 +805,9 @@ def create_run_directory(cfg: RunConfig, resume_dir: Optional[Path] = None) -> P
 
     # Create new run directory with timestamp
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_name = f"{cfg.env_name}_{cfg.architecture}_{cfg.dataset_type}_seed{cfg.seed}_{ts}"
+    run_name = (
+        f"{cfg.env_name}_{cfg.architecture}_{cfg.dataset_type}_seed{cfg.seed}_{ts}"
+    )
     run_dir = ensure_dir(cfg.work_dir / run_name)
 
     # Create subdirectories

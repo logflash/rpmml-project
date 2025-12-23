@@ -80,20 +80,22 @@ def sample_free_point(wall_rects, rng, bounds=(-1.4, 1.4, -1.4, 1.4), max_tries=
 
     raise RuntimeError("Failed to sample free point")
 
-#start/end eps is always 0.2
-#consecutive jumps: 0.2 for open, 0.2 for umaze, 0.2 for medium
-#32 for open, 32 for umaze, 64 for medium
+
+# start/end eps is always 0.2
+# consecutive jumps: 0.2 for open, 0.2 for umaze, 0.2 for medium
+# 32 for open, 32 for umaze, 64 for medium
 def check_consecutive_points(traj_model, max_allowed):
     """Check if consecutive points aren't too jumpy"""
     diffs = np.linalg.norm(traj_model[1:, :2] - traj_model[:-1, :2], axis=1)
     max_jump = diffs.max()
-    #print(f"Max step size: {max_jump:.4f}")
+    # print(f"Max step size: {max_jump:.4f}")
     if max_jump > max_allowed:  # Adjust threshold based on your maze
-        #print("  ⚠️  WARNING: Large discontinuity detected!")
+        # print("  ⚠️  WARNING: Large discontinuity detected!")
         return False
     else:
-        #print("  ✓ Trajectory appears continuous")
+        # print("  ✓ Trajectory appears continuous")
         return True
+
 
 def endpoint_within_eps(pos_dense, start_xy, goal_xy, start_eps=0.05, goal_eps=0.05):
     """Check if the endpoints are in the correct locations."""

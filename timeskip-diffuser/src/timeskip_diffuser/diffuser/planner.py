@@ -222,12 +222,12 @@ def expand_spline_from_skip_list(skip_list, dt=0.01):
         # SCALE velocities to spline coordinates
         v0_scaled = velocities[i] * T
         v1_scaled = velocities[i + 1] * T
-        #Fixed negative predicted timeskips by clamping to positive - Tomasz
+        # Fixed negative predicted timeskips by clamping to positive - Tomasz
         if not np.isfinite(k) or k <= 0:
             print("k invalid")
             k = 0
-            #Don't raise error anymore
-            #raise ValueError(f"Invalid skip k={k} at segment {i}")
+            # Don't raise error anymore
+            # raise ValueError(f"Invalid skip k={k} at segment {i}")
         num_samples = np.ceil(k).astype(int) + 1  # +1 to include endpoint
 
         P, V, A = hermite_segment(p0, v0_scaled, p1, v1_scaled, num_samples)

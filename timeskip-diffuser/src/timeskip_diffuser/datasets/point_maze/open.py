@@ -126,10 +126,10 @@ class OpenFlatDataset(Dataset):
 
         # Create figure
         _, ax = plt.subplots(figsize=(6, 6))
-        
+
         # -----------------------------
         # Plot the trajectory
-        if flat_traj is not None: 
+        if flat_traj is not None:
             ax.scatter(
                 flat_traj[:, 0],
                 flat_traj[:, 1],
@@ -138,7 +138,6 @@ class OpenFlatDataset(Dataset):
                 edgecolors="k",
                 zorder=4,
             )
-        
 
             # Mark start and end points
             ax.scatter(
@@ -174,7 +173,7 @@ class OpenFlatDataset(Dataset):
             name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, geom_id)
             if name is not None and "block" in name:
                 hx, hy = model.geom_size[geom_id][:2]
-                wall_thickness = 2 * hx      # IMPORTANT: twice as wide
+                wall_thickness = 2 * hx  # IMPORTANT: twice as wide
                 wall_color = (0.65, 0.65, 0.65)
                 break
 
@@ -246,7 +245,6 @@ class OpenFlatDataset(Dataset):
             INNER_MIN_Y - wall_thickness,
             INNER_MAX_Y + wall_thickness,
         )
-
 
         plt.tight_layout()
 
