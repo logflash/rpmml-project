@@ -1,6 +1,7 @@
 # ECE531 Project
 
-Installation instructions:
+## Installation
+
 ```bash
 # Clone this repository and install uv
 cd /scratch/network/${USER}
@@ -11,7 +12,7 @@ cd rpmml-project
 pip install uv --target ..
 uv venv --python=3.10
 source .venv/bin/activate
-uv run --no-cache python scripts/install_all.py
+uv run --no-cache python setup/install_all.py
 # if disk quota exceeded, run `pip cache purge` or `uv clean`
 
 # Mujoco + .bashrc setup
@@ -29,5 +30,38 @@ echo "source /scratch/network/${USER}/rpmml-project/.venv/bin/activate" >> ~/.ba
 
 # Pytorch setup
 python -m ensurepip --upgrade
-uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+uv pip install --no-cache torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+```
+
+## Offline Dataset Building
+
+```bash
+cd timeskip-diffuser/src/timeskip_diffuser/datasets/point_maze/offline_skip
+
+# Build each offline dataset separately
+python offline_dataset_generator.py --env_name "open"
+python offline_dataset_generator.py --env_name "umaze"
+python offline_dataset_generator.py --env_name "medium"
+```
+
+## Training Pipelines
+
+```bash
+cd timeskip-diffuser/src/timeskip_diffuser/pipelines
+
+# Train each model separately
+python train_diffuser.py --config configs/config_[...].yaml
+
+# The result will be stored in runs/
+```
+
+## Run Experiments
+
+```bash
+cd timeskip-diffuser/src/timeskip_diffuser/pipelines
+
+# Run the experiment pipeline
+run_experiments_script.py --config experiments_config.yaml
+
+# The result will be stored in runs/
 ```

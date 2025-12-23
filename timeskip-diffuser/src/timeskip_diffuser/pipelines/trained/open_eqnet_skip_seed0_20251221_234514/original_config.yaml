@@ -1,0 +1,28 @@
+seed: 0
+
+env:
+  name: open
+
+model:
+  architecture: eqnet
+  skips: true
+
+paths:
+  work_dir: runs
+
+dataset:
+  type: skip
+  args:
+    horizon: 32
+
+train:
+  args:
+    timesteps: 200
+    lr: 1e-4
+    batch_size: 128
+    guidance_scale: 2.0
+    hidden_dim: 128
+    time_dim: 64
+    n_layers: 10
+    epochs: 20
+    save_every: 5

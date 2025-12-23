@@ -161,6 +161,19 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
+#heavy datasets
+timeskip-diffuser/src/timeskip_diffuser/datasets/cleaned*
+timeskip-diffuser/src/timeskip_diffuser/datasets/offline*
+timeskip-diffuser/src/timeskip_diffuser/datasets/fixed*
+
+
+
+#checkpoint + logging
+timeskip-diffuser/src/timeskip_diffuser/diffuser/wandb
+timeskip-diffuser/src/timeskip_diffuser/diffuser/checkpoints
+
+
+
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
@@ -168,3 +181,35 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+# --- LARGE NPZ / DATASETS ---
+*.npz
+*.npy
+data/
+offline_datasets/
+**/fixed_stats_*.npz
+
+# --- WANDB RUN ARTIFACTS ---
+wandb/
+**/*.wandb
+
+# --- MODEL CHECKPOINTS / LOGS ---
+checkpoints/
+__unused/
+*.pt
+*.pth
+*.ckpt
+
+# --- LARGE LOG DIRECTORIES ---
+logs/
+output/
+runs/
+figures/
+
+# --- CACHE / GENERATED FILES ---
+__pycache__/
+*.pkl
+*.pickle
+*.zip
+*.tar
+*.gz
+*.h5
